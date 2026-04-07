@@ -1,0 +1,165 @@
+{
+  "name": "02 — GitHub PR Merged → Coolify Deploy → Notify",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-webhook",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "github-webhook",
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-merged",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "closed",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "check-base",
+              "leftValue": "={{ $json.pull_request.merged }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-merged",
+      "name": "Only Merged PRs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COOLIFY_URL }}/api/v1/deploy",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.COOLIFY_API_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"uuid\": $env.COOLIFY_APP_UUID, \"force\": false} }}",
+        "options": {}
+      },
+      "id": "trigger-deploy",
+      "name": "Trigger Coolify Deploy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"Write a 2-sentence deploy notification for this PR merge. PR: #\" + $('GitHub Webhook').item.json.pull_request.number + \" — \" + $('GitHub Webhook').item.json.pull_request.title + \". Author: \" + $('GitHub Webhook').item.json.pull_request.user.login + \". Branch: \" + $('GitHub Webhook').item.json.pull_request.base.ref + \". Be concise and professional.\"}]} }}",
+        "options": {}
+      },
+      "id": "write-notification",
+      "name": "Write Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pr = $('GitHub Webhook').item.json.pull_request;\nconst deployResult = $('Trigger Coolify Deploy').item.json;\nconst aiMsg = $('Write Notification').item.json.content[0].text;\n\nreturn {\n  message: aiMsg,\n  pr_number: pr.number,\n  pr_title: pr.title,\n  author: pr.user.login,\n  branch: pr.base.ref,\n  deploy_id: deployResult.deployment_uuid || 'triggered',\n  url: pr.html_url\n};"
+      },
+      "id": "merge-data",
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"embeds\": [{\"title\": \"🚀 Deployed: \" + $json.pr_title, \"description\": $json.message, \"color\": 5763719, \"fields\": [{\"name\": \"PR\", \"value\": \"[#\" + $json.pr_number + \"](\" + $json.url + \")\", \"inline\": true}, {\"name\": \"Author\", \"value\": $json.author, \"inline\": true}, {\"name\": \"Branch\", \"value\": $json.branch, \"inline\": true}]}]} }}",
+        "options": {}
+      },
+      "id": "discord-notify",
+      "name": "Discord Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AFFINE_URL }}/api/workspaces/{{ $env.AFFINE_WORKSPACE_ID }}/docs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.AFFINE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": \"Deploy: \" + $json.pr_title + \" — \" + new Date().toISOString().split('T')[0], \"content\": \"## Deploy Log\\n\\n\" + $json.message + \"\\n\\n**PR:** #\" + $json.pr_number + \"\\n**Author:** \" + $json.author + \"\\n**Branch:** \" + $json.branch + \"\\n**Deploy ID:** \" + $json.deploy_id} }}",
+        "options": {}
+      },
+      "id": "log-to-affine",
+      "name": "Log to AFFiNE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 460]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": { "main": [[{ "node": "Only Merged PRs", "type": "main", "index": 0 }]] },
+    "Only Merged PRs": {
+      "main": [
+        [
+          { "node": "Trigger Coolify Deploy", "type": "main", "index": 0 },
+          { "node": "Write Notification", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Trigger Coolify Deploy": { "main": [[{ "node": "Merge Data", "type": "main", "index": 0 }]] },
+    "Write Notification": { "main": [[{ "node": "Merge Data", "type": "main", "index": 0 }]] },
+    "Merge Data": {
+      "main": [
+        [
+          { "node": "Discord Notify", "type": "main", "index": 0 },
+          { "node": "Log to AFFiNE", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Set this webhook URL in GitHub repo Settings → Webhooks. Triggers on pull_request events. Auto-deploys to Coolify, sends Discord notification, logs to AFFiNE.",
+    "env_required": ["COOLIFY_URL", "COOLIFY_API_TOKEN", "COOLIFY_APP_UUID", "DISCORD_WEBHOOK_URL", "AFFINE_URL", "AFFINE_WORKSPACE_ID", "AFFINE_TOKEN", "ANTHROPIC_API_KEY"]
+  }
+}

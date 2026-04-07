@@ -1,0 +1,169 @@
+{
+  "name": "07 — Text-to-Video Generation (Claude prompt → ComfyUI → MinIO → AFFiNE)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Generate Video Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notes": "POST: {prompt, style, duration_seconds, resolution, project}"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 600, \"system\": \"You are a video generation prompt engineer for Wan2.2. Expand the user's brief description into a detailed, cinematic generation prompt. Return JSON only: {\\\"positive_prompt\\\": string, \\\"negative_prompt\\\": string}\", \"messages\": [{\"role\": \"user\", \"content\": \"Brief: \" + $json.prompt + \"\\nStyle: \" + ($json.style || 'cinematic') + \"\\nDuration: \" + ($json.duration_seconds || 5) + \" seconds\"}]} }}",
+        "options": {}
+      },
+      "id": "expand-prompt",
+      "name": "Expand Prompt with Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeResp = $('Expand Prompt with Claude').item.json;\nconst input = $('Generate Video Webhook').item.json;\nconst text = claudeResp.content[0].text;\nlet prompts;\ntry { prompts = JSON.parse(text.replace(/```json|```/g,'')); } \ncatch(e) { prompts = {positive_prompt: text, negative_prompt: 'blurry, watermark, low quality, deformed'}; }\n\nconst w = input.resolution === '720p' ? 1280 : 832;\nconst h = input.resolution === '720p' ? 720 : 480;\nconst frames = Math.min(Math.max(Math.floor((input.duration_seconds || 5) * 16), 17), 97);\n\nreturn {\n  positive_prompt: prompts.positive_prompt,\n  negative_prompt: prompts.negative_prompt || 'blurry, watermark, distorted, low quality',\n  width: w,\n  height: h,\n  num_frames: frames,\n  steps: 20,\n  cfg_scale: 7.5,\n  project: input.project || 'default',\n  original_brief: input.prompt\n};"
+      },
+      "id": "build-params",
+      "name": "Build ComfyUI Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMFYUI_URL }}/prompt",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"prompt\": {\"1\": {\"class_type\": \"CLIPTextEncode\", \"inputs\": {\"text\": $json.positive_prompt, \"clip\": [\"4\", 1]}}, \"2\": {\"class_type\": \"CLIPTextEncode\", \"inputs\": {\"text\": $json.negative_prompt, \"clip\": [\"4\", 1]}}, \"3\": {\"class_type\": \"WanVideoSampler\", \"inputs\": {\"model\": [\"4\", 0], \"positive\": [\"1\", 0], \"negative\": [\"2\", 0], \"steps\": $json.steps, \"cfg\": $json.cfg_scale, \"width\": $json.width, \"height\": $json.height, \"num_frames\": $json.num_frames}}, \"4\": {\"class_type\": \"UNETLoader\", \"inputs\": {\"unet_name\": \"wan2.2_t2v_5B_fp16.safetensors\"}}, \"5\": {\"class_type\": \"VHS_VideoCombine\", \"inputs\": {\"images\": [\"3\", 0], \"frame_rate\": 16, \"filename_prefix\": \"wan_output\"}}}} }}",
+        "options": {}
+      },
+      "id": "submit-to-comfyui",
+      "name": "Submit to ComfyUI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "id": "wait",
+      "name": "Wait 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.COMFYUI_URL }}/history/={{ $('Submit to ComfyUI').item.json.prompt_id }}",
+        "options": {}
+      },
+      "id": "poll-status",
+      "name": "Poll ComfyUI Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const history = $input.item.json;\nconst promptId = $('Submit to ComfyUI').item.json.prompt_id;\nconst job = history[promptId];\nif (!job || !job.outputs) return [{done: false}];\nconst outputs = Object.values(job.outputs);\nconst videoNode = outputs.find(o => o.gifs || o.videos);\nif (!videoNode) return [{done: false}];\nconst files = videoNode.gifs || videoNode.videos || [];\nif (files.length === 0) return [{done: false}];\nreturn [{done: true, filename: files[0].filename, subfolder: files[0].subfolder || ''}];"
+      },
+      "id": "check-done",
+      "name": "Check if Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            { "leftValue": "={{ $json.done }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }
+          ]
+        }
+      },
+      "id": "if-done",
+      "name": "Video Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1700, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.COMFYUI_URL }}/view?filename={{ $json.filename }}&subfolder={{ $json.subfolder }}&type=output",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "download-video",
+      "name": "Download Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AFFINE_URL }}/api/workspaces/{{ $env.AFFINE_WORKSPACE_ID }}/docs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.AFFINE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": \"Video: \" + $('Build ComfyUI Params').item.json.original_brief.substring(0, 60), \"content\": \"## Generated Video\\n\\n**Brief:** \" + $('Build ComfyUI Params').item.json.original_brief + \"\\n\\n**Positive prompt:**\\n\" + $('Build ComfyUI Params').item.json.positive_prompt + \"\\n\\n**Settings:** \" + $('Build ComfyUI Params').item.json.width + \"x\" + $('Build ComfyUI Params').item.json.height + \" · \" + $('Build ComfyUI Params').item.json.num_frames + \" frames\\n\\n**Project:** \" + $('Build ComfyUI Params').item.json.project + \"\\n\\n**File:** \" + $('Check if Done').item.json.filename} }}",
+        "options": {}
+      },
+      "id": "log-to-affine",
+      "name": "Log to AFFiNE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, 400]
+    }
+  ],
+  "connections": {
+    "Generate Video Webhook": { "main": [[{ "node": "Expand Prompt with Claude", "type": "main", "index": 0 }]] },
+    "Expand Prompt with Claude": { "main": [[{ "node": "Build ComfyUI Params", "type": "main", "index": 0 }]] },
+    "Build ComfyUI Params": { "main": [[{ "node": "Submit to ComfyUI", "type": "main", "index": 0 }]] },
+    "Submit to ComfyUI": { "main": [[{ "node": "Wait 10s", "type": "main", "index": 0 }]] },
+    "Wait 10s": { "main": [[{ "node": "Poll ComfyUI Status", "type": "main", "index": 0 }]] },
+    "Poll ComfyUI Status": { "main": [[{ "node": "Check if Done", "type": "main", "index": 0 }]] },
+    "Check if Done": { "main": [[{ "node": "Video Ready?", "type": "main", "index": 0 }]] },
+    "Video Ready?": { "main": [[{ "node": "Download Video", "type": "main", "index": 0 }, { "node": "Log to AFFiNE", "type": "main", "index": 0 }], [{ "node": "Wait 10s", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "POST to /webhook/generate-video with {prompt, style, duration_seconds, resolution, project}. Claude expands prompt → ComfyUI generates with Wan2.2 → downloads video → logs to AFFiNE.",
+    "usage": "curl -X POST http://localhost:5678/webhook/generate-video -H 'Content-Type: application/json' -d '{\"prompt\": \"a cat surfing at sunset\", \"style\": \"cinematic\", \"duration_seconds\": 5, \"project\": \"MyApp\"}'"
+  }
+}

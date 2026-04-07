@@ -1,0 +1,196 @@
+{
+  "name": "19 — Content Machine (50+ Sources → Score → Multi-Format → Auto-Post)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] }
+      },
+      "id": "trigger",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FRESHRSS_URL }}/api/greader.php/reader/api/0/stream/contents/reading-list?n=20&xt=user/-/state/com.google/read",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "GoogleLogin auth={{ $env.FRESHRSS_AUTH }}" }
+          ]
+        }
+      },
+      "id": "fetch-feeds",
+      "name": "Fetch Unread Articles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const feed = $input.item.json;\nconst items = feed.items || [];\nreturn items.map(item => ({\n  id: item.id,\n  title: item.title,\n  summary: item.summary?.content?.substring(0, 500) || '',\n  url: item.canonical?.[0]?.href || '',\n  source: item.origin?.title || '',\n  published: new Date(item.published * 1000).toISOString(),\n  age_hours: (Date.now() - item.published * 1000) / 3600000\n})).filter(i => i.age_hours < 24 && i.url);"
+      },
+      "id": "parse-articles",
+      "name": "Parse Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": { "batchSize": 1, "options": {} },
+      "id": "split",
+      "name": "Process One by One",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.QDRANT_URL }}/collections/content_velocity/points/search",
+        "sendHeaders": true,
+        "headerParameters": [{ "name": "Content-Type", "value": "application/json" }],
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"vector\": [], \"filter\": { \"must\": [{ \"key\": \"published_at\", \"range\": { \"gte\": (Date.now() - 7*24*3600*1000) } }] }, \"limit\": 100, \"with_payload\": false } }}"
+      },
+      "id": "velocity-check",
+      "name": "Check Topic Velocity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 300, \"system\": \"You score articles for a content creator. Niche: \" + $env.NICHE_DESCRIPTION + \". Return ONLY valid JSON.\", \"messages\": [{ \"role\": \"user\", \"content\": \"Score this article (1-10 each): Title: '\" + $('Parse Articles').item.json.title + \"'\\nSummary: \" + $('Parse Articles').item.json.summary + \"\\n\\nReturn JSON only: {\\\"niche\\\": N, \\\"value\\\": N, \\\"engagement\\\": N, \\\"score\\\": N, \\\"angle\\\": \\\"one sentence hook\\\", \\\"best_platform\\\": \\\"twitter|linkedin|instagram|tiktok\\\"}\" }] } }}"
+      },
+      "id": "score-article",
+      "name": "Claude Scores Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.item.json;\nconst text = response.content[0].text;\nlet scoring;\ntry {\n  scoring = JSON.parse(text.replace(/```json|```/g, '').trim());\n} catch(e) {\n  scoring = { score: 0, angle: '', best_platform: 'twitter' };\n}\nconst article = $('Parse Articles').item.json;\nreturn {\n  ...article,\n  ...scoring,\n  should_post: scoring.score >= 7,\n  review_needed: scoring.score >= 5 && scoring.score < 7\n};"
+      },
+      "id": "merge-scores",
+      "name": "Merge Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "conditions": [{ "leftValue": "={{ $json.should_post }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }]
+        }
+      },
+      "id": "auto-approve-gate",
+      "name": "Score ≥ 7?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 1500, \"system\": \"You are a social media expert for a \" + $env.NICHE_DESCRIPTION + \" brand. Write platform-optimized content. Return ONLY valid JSON.\", \"messages\": [{ \"role\": \"user\", \"content\": \"Based on this article: '\" + $json.title + \"'\\nAngle: \" + $json.angle + \"\\n\\nWrite all formats. Return JSON:\\n{\\\"twitter_thread\\\": [\\\"tweet1\\\",\\\"tweet2\\\",\\\"tweet3\\\",\\\"tweet4\\\",\\\"tweet5\\\"],\\\"linkedin\\\": \\\"full post 200 words\\\",\\\"instagram\\\": \\\"caption + .\\n.\\n.\\n#hashtags\\\",\\\"tiktok_script\\\": \\\"60 second script\\\",\\\"newsletter_blurb\\\": \\\"2-3 sentences for weekly digest\\\",\\\"image_prompt\\\": \\\"FLUX.1 prompt for social image\\\"}\" }] } }}"
+      },
+      "id": "generate-content",
+      "name": "Generate All Formats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.item.json;\nconst text = response.content[0].text;\nlet content;\ntry {\n  content = JSON.parse(text.replace(/```json|```/g, '').trim());\n} catch(e) {\n  return { error: 'Parse failed', raw: text };\n}\nconst now = new Date();\nconst slots = {\n  twitter: new Date(now.getTime() + 30*60*1000),\n  linkedin: new Date(now.getTime() + 2*3600*1000),\n  instagram: new Date(now.getTime() + 5*3600*1000),\n  tiktok: new Date(now.getTime() + 7*3600*1000)\n};\nreturn {\n  source_url: $('Parse Articles').item.json.url,\n  source_title: $('Parse Articles').item.json.title,\n  score: $('Merge Scores').item.json.score,\n  content,\n  scheduled_at: slots\n};"
+      },
+      "id": "prep-schedule",
+      "name": "Prep Schedule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.POSTIZ_URL }}/api/public/v1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.POSTIZ_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"posts\": [{ \"provider\": \"x\", \"content\": $json.content.twitter_thread.join('\\n\\n'), \"date\": $json.scheduled_at.twitter }, { \"provider\": \"linkedin\", \"content\": $json.content.linkedin, \"date\": $json.scheduled_at.linkedin }, { \"provider\": \"instagram\", \"content\": $json.content.instagram, \"date\": $json.scheduled_at.instagram }] } }}"
+      },
+      "id": "schedule-posts",
+      "name": "Schedule to Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/telegram-review",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"text\": \"📊 Score \" + $json.score + \"/10 — Review needed:\\n\\n\" + $json.title + \"\\n\\nAngle: \" + $json.angle + \"\\n\\nApprove? Reply Y to post or N to skip\" } }}"
+      },
+      "id": "send-for-review",
+      "name": "Queue for Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 400]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": { "main": [[{ "node": "Fetch Unread Articles", "type": "main", "index": 0 }]] },
+    "Fetch Unread Articles": { "main": [[{ "node": "Parse Articles", "type": "main", "index": 0 }]] },
+    "Parse Articles": { "main": [[{ "node": "Process One by One", "type": "main", "index": 0 }]] },
+    "Process One by One": { "main": [[{ "node": "Check Topic Velocity", "type": "main", "index": 0 }]] },
+    "Check Topic Velocity": { "main": [[{ "node": "Claude Scores Article", "type": "main", "index": 0 }]] },
+    "Claude Scores Article": { "main": [[{ "node": "Merge Scores", "type": "main", "index": 0 }]] },
+    "Merge Scores": { "main": [[{ "node": "Score ≥ 7?", "type": "main", "index": 0 }]] },
+    "Score ≥ 7?": {
+      "main": [
+        [{ "node": "Generate All Formats", "type": "main", "index": 0 }],
+        [{ "node": "Queue for Review", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate All Formats": { "main": [[{ "node": "Prep Schedule", "type": "main", "index": 0 }]] },
+    "Prep Schedule": { "main": [[{ "node": "Schedule to Postiz", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

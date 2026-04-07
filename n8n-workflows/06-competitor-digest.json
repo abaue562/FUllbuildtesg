@@ -1,0 +1,141 @@
+{
+  "name": "06 — Weekly Competitor Research Digest (Friday 5pm)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 17 * * 5" }]
+        }
+      },
+      "id": "schedule",
+      "name": "Friday 5pm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Define your competitors + research angles here\nconst competitors = JSON.parse($env.COMPETITOR_LIST || '[]');\nconst topics = JSON.parse($env.RESEARCH_TOPICS || '[\"product updates\",\"pricing changes\",\"new features\"]');\n\nif (competitors.length === 0) {\n  return [{ query: 'top competitors in my market recent updates 2025', topic: 'general market' }];\n}\n\nreturn competitors.flatMap(c => \n  topics.slice(0, 2).map(t => ({ query: `${c} ${t} ${new Date().getFullYear()}`, topic: `${c} — ${t}`, competitor: c }))\n).slice(0, 6);"
+      },
+      "id": "build-queries",
+      "name": "Build Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PERPLEXICA_URL }}/api/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{ $json.query }}" },
+            { "name": "focusMode", "value": "webSearch" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-each",
+      "name": "Search Each",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "include": "allFields"
+      },
+      "id": "collect-results",
+      "name": "Collect All Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"claude-sonnet-4-20250514\", \"max_tokens\": 2000, \"system\": \"You are a product strategist writing a weekly competitive intelligence report. Be direct. Focus on what matters for product decisions.\", \"messages\": [{\"role\": \"user\", \"content\": \"Write a weekly competitive intelligence digest from these search results. Week ending \" + new Date().toLocaleDateString() + \"\\n\\nSearch results:\\n\" + JSON.stringify($json.data.map(d => ({topic: d.topic, results: d.results || d}))) + \"\\n\\nFormat:\\n## 🔍 Weekly Competitive Digest\\n### Key Moves This Week (bullet list of most important changes)\\n### Pricing & Positioning (any changes)\\n### Feature Gaps (what they have that we might need)\\n### Opportunities (weaknesses we can exploit)\\n### Our Response (recommended actions)\\n\\n_Keep it under 500 words. Be ruthlessly specific._\"}]} }}",
+        "options": {}
+      },
+      "id": "write-digest",
+      "name": "Write Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const digest = $('Write Digest').item.json.content[0].text;\nconst date = new Date().toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'});\nreturn {\n  title: `Competitive Digest — Week of ${date}`,\n  content: digest,\n  full: `# Competitive Digest\\n_Week of ${date}_\\n\\n${digest}`\n};"
+      },
+      "id": "format-digest",
+      "name": "Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AFFINE_URL }}/api/workspaces/{{ $env.AFFINE_WORKSPACE_ID }}/docs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.AFFINE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": $json.title, \"content\": $json.full} }}",
+        "options": {}
+      },
+      "id": "save-affine",
+      "name": "Save to AFFiNE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"content\": $json.full.substring(0, 2000)} }}",
+        "options": {}
+      },
+      "id": "send-discord",
+      "name": "Send to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 400]
+    }
+  ],
+  "connections": {
+    "Friday 5pm": { "main": [[{ "node": "Build Queries", "type": "main", "index": 0 }]] },
+    "Build Queries": { "main": [[{ "node": "Search Each", "type": "main", "index": 0 }]] },
+    "Search Each": { "main": [[{ "node": "Collect All Results", "type": "main", "index": 0 }]] },
+    "Collect All Results": { "main": [[{ "node": "Write Digest", "type": "main", "index": 0 }]] },
+    "Write Digest": { "main": [[{ "node": "Format", "type": "main", "index": 0 }]] },
+    "Format": { "main": [[{ "node": "Save to AFFiNE", "type": "main", "index": 0 }, { "node": "Send to Discord", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Every Friday at 5pm. Searches Perplexica for competitor updates. Claude writes strategic digest. Saves to AFFiNE + Discord.",
+    "env_required": ["COMPETITOR_LIST", "RESEARCH_TOPICS", "PERPLEXICA_URL", "ANTHROPIC_API_KEY", "AFFINE_URL", "AFFINE_WORKSPACE_ID", "AFFINE_TOKEN", "DISCORD_WEBHOOK_URL"],
+    "env_example": "COMPETITOR_LIST=[\"CompanyA\",\"CompanyB\"] RESEARCH_TOPICS=[\"pricing\",\"new features\",\"funding\"]"
+  }
+}

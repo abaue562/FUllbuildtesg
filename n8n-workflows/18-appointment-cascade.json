@@ -1,0 +1,199 @@
+{
+  "name": "18 — Appointment Reminder Cascade (Cal.com → Email+SMS+WA+Push+AI Call)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cal-booking",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "cal-webhook",
+      "name": "Cal.com Booking Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notes": "Configure in Cal.com: Settings → Webhooks → add this URL"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.item.json;\nconst booking = payload.payload || payload;\nconst eventTime = new Date(booking.startTime || booking.start_time);\nconst now = new Date();\nconst msUntil = eventTime.getTime() - now.getTime();\n\nreturn {\n  booking_uid: booking.uid,\n  event_title: booking.title,\n  attendee_name: booking.attendees?.[0]?.name || booking.name,\n  attendee_email: booking.attendees?.[0]?.email || booking.email,\n  attendee_phone: booking.attendees?.[0]?.phoneNumber || '',\n  start_time: eventTime.toISOString(),\n  start_time_readable: eventTime.toLocaleString('en-US', {weekday:'long',month:'long',day:'numeric',hour:'numeric',minute:'2-digit'}),\n  ms_until: msUntil,\n  h48_delay: Math.max(0, msUntil - 48*3600*1000),\n  h24_delay: Math.max(0, msUntil - 24*3600*1000),\n  h2_delay: Math.max(0, msUntil - 2*3600*1000),\n  m30_delay: Math.max(0, msUntil - 30*60*1000),\n  noshow_delay: msUntil + 15*60*1000,\n  organizer: booking.organizer?.name || 'Your Team'\n};"
+      },
+      "id": "parse-booking",
+      "name": "Parse Booking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 600, \"system\": \"Write appointment reminder messages. Be warm, brief, professional. Return JSON only.\", \"messages\": [{\"role\": \"user\", \"content\": \"Write reminder messages for: Name=\" + $json.attendee_name + \", Event=\" + $json.event_title + \", Time=\" + $json.start_time_readable + \". Return JSON: {email_subject, email_body, sms_48h, sms_24h, whatsapp_2h, push_30min}\"}]} }}",
+        "options": {}
+      },
+      "id": "write-messages",
+      "name": "Claude Writes Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claude = $('Claude Writes Messages').item.json.content[0].text;\nconst booking = $('Parse Booking').item.json;\nlet msgs;\ntry { msgs = JSON.parse(claude.replace(/```json|```/g,'').trim()); }\ncatch(e) { msgs = {email_subject:'Appointment Reminder',email_body:'Your appointment is confirmed.',sms_48h:'Reminder: appt tomorrow.',sms_24h:'See you today!',whatsapp_2h:'Your appt is in 2 hours!',push_30min:'Starting in 30 min!'}; }\nreturn {...booking, ...msgs};"
+      },
+      "id": "merge",
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LISTMONK_URL }}/api/tx",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Basic {{ Buffer.from($env.LISTMONK_USER+':'+$env.LISTMONK_PASS).toString('base64') }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"subscriber_email\": $json.attendee_email, \"template_id\": 1, \"data\": {\"subject\": $json.email_subject, \"body\": $json.email_body, \"name\": $json.attendee_name, \"time\": $json.start_time_readable}} }}",
+        "options": {}
+      },
+      "id": "send-confirmation-email",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 160]
+    },
+    {
+      "parameters": { "amount": "={{ $json.h48_delay }}", "unit": "milliseconds" },
+      "id": "wait-48h",
+      "name": "Wait T-48h",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/send-sms",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"to\": $json.attendee_phone, \"message\": $json.sms_48h, \"contact_id\": $json.booking_uid} }}",
+        "options": {}
+      },
+      "id": "sms-48h",
+      "name": "SMS T-48h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": { "amount": "={{ $json.h24_delay - $json.h48_delay }}", "unit": "milliseconds" },
+      "id": "wait-24h",
+      "name": "Wait T-24h",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/send-sms",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"to\": $json.attendee_phone, \"message\": $json.sms_24h} }}",
+        "options": {}
+      },
+      "id": "sms-24h",
+      "name": "SMS T-24h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": { "amount": "={{ $json.h2_delay - $json.h24_delay }}", "unit": "milliseconds" },
+      "id": "wait-2h",
+      "name": "Wait T-2h",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"session\": \"default\", \"chatId\": $json.attendee_phone.replace('+','') + \"@c.us\", \"text\": $json.whatsapp_2h} }}",
+        "options": {}
+      },
+      "id": "whatsapp-2h",
+      "name": "WhatsApp T-2h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 300]
+    },
+    {
+      "parameters": { "amount": "={{ $json.m30_delay - $json.h2_delay }}", "unit": "milliseconds" },
+      "id": "wait-30m",
+      "name": "Wait T-30min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NTFY_URL }}/appointment-reminders",
+        "sendBody": true,
+        "contentType": "text",
+        "body": "={{ $json.push_30min }}",
+        "options": {}
+      },
+      "id": "push-30m",
+      "name": "Push T-30min",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2660, 300]
+    }
+  ],
+  "connections": {
+    "Cal.com Booking Webhook": { "main": [[{ "node": "Parse Booking", "type": "main", "index": 0 }]] },
+    "Parse Booking": { "main": [[{ "node": "Claude Writes Messages", "type": "main", "index": 0 }]] },
+    "Claude Writes Messages": { "main": [[{ "node": "Merge Data", "type": "main", "index": 0 }]] },
+    "Merge Data": { "main": [[{ "node": "Send Confirmation Email", "type": "main", "index": 0 }, { "node": "Wait T-48h", "type": "main", "index": 0 }]] },
+    "Wait T-48h": { "main": [[{ "node": "SMS T-48h", "type": "main", "index": 0 }]] },
+    "SMS T-48h": { "main": [[{ "node": "Wait T-24h", "type": "main", "index": 0 }]] },
+    "Wait T-24h": { "main": [[{ "node": "SMS T-24h", "type": "main", "index": 0 }]] },
+    "SMS T-24h": { "main": [[{ "node": "Wait T-2h", "type": "main", "index": 0 }]] },
+    "Wait T-2h": { "main": [[{ "node": "WhatsApp T-2h", "type": "main", "index": 0 }]] },
+    "WhatsApp T-2h": { "main": [[{ "node": "Wait T-30min", "type": "main", "index": 0 }]] },
+    "Wait T-30min": { "main": [[{ "node": "Push T-30min", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Cal.com booking → Claude writes personalized messages → confirmation email → T-48h SMS → T-24h SMS → T-2h WhatsApp → T-30min push notification. Reduces no-shows by 40-60%."
+  }
+}

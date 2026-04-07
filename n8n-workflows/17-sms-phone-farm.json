@@ -1,0 +1,126 @@
+{
+  "name": "17 — SMS Phone Farm Router (Load Balance Across Real SIM Cards)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-sms",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Send SMS Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notes": "POST: {to, message, contact_id, campaign_id}"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TEXTBEE_URL }}/api/v1/gateway/devices",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.TEXTBEE_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-devices",
+      "name": "Get Available Phones",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const devices = $input.item.json;\nconst input = $('Send SMS Webhook').item.json;\nconst to = input.to;\n\nconst online = Array.isArray(devices) \n  ? devices.filter(d => d.isOnline && d.isEnabled)\n  : [];\n\nif (online.length === 0) {\n  throw new Error('No phones online');\n}\n\nconst areaCode = to.replace(/[^0-9]/g, '').substring(1, 4);\n\nconst matchArea = online.find(d => \n  d.phoneNumber && d.phoneNumber.replace(/[^0-9]/g,'').substring(1,4) === areaCode\n);\n\nconst selected = matchArea || online[Math.floor(Math.random() * online.length)];\n\nreturn {\n  deviceId: selected._id || selected.id,\n  devicePhone: selected.phoneNumber,\n  to: input.to,\n  message: input.message,\n  contact_id: input.contact_id,\n  campaign_id: input.campaign_id,\n  selected_reason: matchArea ? 'area_code_match' : 'round_robin'\n};"
+      },
+      "id": "select-phone",
+      "name": "Select Best Phone",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TEXTBEE_URL }}/api/v1/gateway/devices/={{ $json.deviceId }}/send-sms",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.TEXTBEE_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"recipients\": [$json.to], \"message\": $json.message} }}",
+        "options": {}
+      },
+      "id": "send-sms",
+      "name": "Send via Phone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.item.json;\nconst input = $('Select Best Phone').item.json;\nconst success = result.success !== false;\n\nreturn {\n  success,\n  to: input.to,\n  from: input.devicePhone,\n  device_id: input.deviceId,\n  contact_id: input.contact_id,\n  campaign_id: input.campaign_id,\n  message_id: result.id || result._id,\n  sent_at: new Date().toISOString()\n};"
+      },
+      "id": "format-result",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 150, \"messages\": [{\"role\": \"user\", \"content\": \"Rate this SMS message for spam risk (1-10, 10=highest risk) and suggest one improvement if score > 5. Message: '\" + $('Send SMS Webhook').item.json.message + \"' Response: JSON only {score: N, suggestion: string|null}\"}]} }}",
+        "options": {}
+      },
+      "id": "spam-check",
+      "name": "Spam Risk Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 460]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Format Result').item.json }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1300, 300]
+    }
+  ],
+  "connections": {
+    "Send SMS Webhook": { "main": [[{ "node": "Get Available Phones", "type": "main", "index": 0 }]] },
+    "Get Available Phones": { "main": [[{ "node": "Select Best Phone", "type": "main", "index": 0 }]] },
+    "Select Best Phone": { "main": [[{ "node": "Send via Phone", "type": "main", "index": 0 }, { "node": "Spam Risk Check", "type": "main", "index": 0 }]] },
+    "Send via Phone": { "main": [[{ "node": "Format Result", "type": "main", "index": 0 }]] },
+    "Format Result": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Routes SMS through real Android phones with SIM cards. Selects best phone by area code match, then round-robin. Also runs Claude spam risk check in parallel.",
+    "env_required": ["TEXTBEE_URL", "TEXTBEE_API_KEY", "ANTHROPIC_API_KEY"],
+    "setup": "Install android-sms-gateway APK on Android phones. Each phone registers to TextBee. Multiple phones = higher volume capacity."
+  }
+}

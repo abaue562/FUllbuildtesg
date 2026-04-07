@@ -1,0 +1,137 @@
+{
+  "name": "01 — Research Pipeline (Perplexica → Claude → AFFiNE)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "research",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PERPLEXICA_URL }}/api/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{ $json.query }}" },
+            { "name": "focusMode", "value": "={{ $json.mode || 'webSearch' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "perplexica-search",
+      "name": "Search Perplexica",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "claude-sonnet-4-20250514"
+            },
+            {
+              "name": "max_tokens",
+              "value": "2048"
+            },
+            {
+              "name": "system",
+              "value": "You are a senior research analyst. Given web search results, produce a structured research note with: ## Summary (3-5 sentences), ## Key Findings (bullet list), ## Action Items (bullet list), ## Sources. Be concise and actionable."
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"Research query: {{ $('Webhook Trigger').item.json.query }}\\n\\nSearch results:\\n{{ JSON.stringify($json.results || $json) }}\"}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "claude-synthesize",
+      "name": "Claude Synthesize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.item.json;\nconst text = response.content[0].text;\nconst query = $('Webhook Trigger').item.json.query;\nconst project = $('Webhook Trigger').item.json.project || 'General';\nconst date = new Date().toISOString().split('T')[0];\n\nreturn {\n  title: `Research: ${query} — ${date}`,\n  content: text,\n  project: project,\n  tags: ['research', 'auto-generated'],\n  markdown: `# Research: ${query}\\n_Generated: ${date}_\\n_Project: ${project}_\\n\\n${text}`\n};"
+      },
+      "id": "format-note",
+      "name": "Format Note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AFFINE_URL }}/api/workspaces/{{ $env.AFFINE_WORKSPACE_ID }}/docs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.AFFINE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": $json.title, \"content\": $json.markdown} }}",
+        "options": {}
+      },
+      "id": "save-to-affine",
+      "name": "Save to AFFiNE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"status\": \"saved\", \"title\": $('Format Note').item.json.title, \"summary\": $('Format Note').item.json.content.substring(0, 200)} }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Search Perplexica", "type": "main", "index": 0 }]] },
+    "Search Perplexica": { "main": [[{ "node": "Claude Synthesize", "type": "main", "index": 0 }]] },
+    "Claude Synthesize": { "main": [[{ "node": "Format Note", "type": "main", "index": 0 }]] },
+    "Format Note": { "main": [[{ "node": "Save to AFFiNE", "type": "main", "index": 0 }]] },
+    "Save to AFFiNE": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "POST to /webhook/research with {query, project, mode}. Searches Perplexica, synthesizes with Claude, saves to AFFiNE.",
+    "usage": "curl -X POST http://localhost:5678/webhook/research -H 'Content-Type: application/json' -d '{\"query\": \"best auth libraries Next.js 2025\", \"project\": \"MyApp\"}'"
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "name": "05 — Claude Code Session Logger (Decisions → AFFiNE + SurfSense)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "session-log",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "session-webhook",
+      "name": "Session Log Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notes": "Called by Claude Code via AUTOMATE: at end of session"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 1200, \"system\": \"You extract structured decision logs from dev session notes. Return valid JSON only: {\\\"summary\\\": string, \\\"decisions\\\": [{\\\"what\\\": string, \\\"why\\\": string, \\\"alternatives_rejected\\\": string}], \\\"files_changed\\\": [string], \\\"next_steps\\\": [string], \\\"tech_debt\\\": [string]}\", \"messages\": [{\"role\": \"user\", \"content\": \"Extract a structured decision log from this dev session:\\n\\nProject: \" + $json.project + \"\\n\\nSession notes:\\n\" + $json.notes}]} }}",
+        "options": {}
+      },
+      "id": "extract-decisions",
+      "name": "Extract Decisions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $('Extract Decisions').item.json.content[0].text;\nconst input = $('Session Log Webhook').item.json;\nconst date = new Date().toISOString().split('T')[0];\nconst time = new Date().toLocaleTimeString();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(response.replace(/```json|```/g, '').trim());\n} catch(e) {\n  parsed = { summary: response, decisions: [], files_changed: [], next_steps: [], tech_debt: [] };\n}\n\nconst markdown = `# Session Log: ${input.project}\\n_${date} at ${time}_\\n\\n## Summary\\n${parsed.summary}\\n\\n## Decisions Made\\n${parsed.decisions.map(d => `### ${d.what}\\n**Why:** ${d.why}\\n**Rejected:** ${d.alternatives_rejected || 'N/A'}`).join('\\n\\n')}\\n\\n## Files Changed\\n${parsed.files_changed.map(f => `- ${f}`).join('\\n') || 'None listed'}\\n\\n## Next Steps\\n${parsed.next_steps.map(s => `- [ ] ${s}`).join('\\n') || 'None'}\\n\\n## Tech Debt Noted\\n${parsed.tech_debt.map(t => `- ${t}`).join('\\n') || 'None'}\\n\\n---\\n_Auto-logged from Claude Code session_`;\n\nreturn {\n  title: `Session: ${input.project} — ${date}`,\n  markdown,\n  project: input.project,\n  summary: parsed.summary,\n  decisions_count: parsed.decisions.length,\n  next_steps: parsed.next_steps,\n  surfsense_content: `Project: ${input.project}\\nDate: ${date}\\n\\n${parsed.summary}\\n\\nDecisions:\\n${parsed.decisions.map(d => `${d.what}: ${d.why}`).join('\\n')}`\n};"
+      },
+      "id": "format-log",
+      "name": "Format Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AFFINE_URL }}/api/workspaces/{{ $env.AFFINE_WORKSPACE_ID }}/docs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.AFFINE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": $json.title, \"content\": $json.markdown} }}",
+        "options": {}
+      },
+      "id": "save-affine",
+      "name": "Save to AFFiNE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SURFSENSE_URL }}/api/documents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.SURFSENSE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": $json.title, \"content\": $json.surfsense_content, \"tags\": [\"session-log\", $json.project], \"searchSpaceId\": $env.SURFSENSE_SPACE_ID} }}",
+        "options": {}
+      },
+      "id": "index-surfsense",
+      "name": "Index in SurfSense",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"status\": \"logged\", \"title\": $('Format Log').item.json.title, \"decisions\": $('Format Log').item.json.decisions_count} }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Session Log Webhook": { "main": [[{ "node": "Extract Decisions", "type": "main", "index": 0 }]] },
+    "Extract Decisions": { "main": [[{ "node": "Format Log", "type": "main", "index": 0 }]] },
+    "Format Log": { "main": [[{ "node": "Save to AFFiNE", "type": "main", "index": 0 }, { "node": "Index in SurfSense", "type": "main", "index": 0 }]] },
+    "Save to AFFiNE": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Index in SurfSense": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Claude Code calls this via AUTOMATE: log session. Extracts decisions/next steps. Saves to AFFiNE + indexes in SurfSense for future research.",
+    "usage": "In Claude Code: AUTOMATE: log this session to AFFiNE. Project: MyApp. Notes: [paste what was built and decided]"
+  }
+}

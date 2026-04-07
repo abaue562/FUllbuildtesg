@@ -1,0 +1,132 @@
+{
+  "name": "21 — Self-Improving Agent Loop (Weekly Reflection + Auto-Optimize)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "weeks", "weeksInterval": 1 }] }
+      },
+      "id": "trigger",
+      "name": "Every Sunday 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT workflow_name, COUNT(*) as runs, AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END) as success_rate, AVG(duration_ms) as avg_duration, SUM(items_processed) as total_items, MAX(created_at) as last_run FROM workflow_executions WHERE created_at > NOW() - INTERVAL '7 days' GROUP BY workflow_name ORDER BY runs DESC"
+      },
+      "id": "fetch-metrics",
+      "name": "Fetch Week Performance",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT event_name, COUNT(*) as count, AVG((properties->>'value')::float) as avg_value FROM analytics_events WHERE created_at > NOW() - INTERVAL '7 days' GROUP BY event_name ORDER BY count DESC LIMIT 20"
+      },
+      "id": "fetch-analytics",
+      "name": "Fetch Business Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "const workflows = $('Fetch Week Performance').all().map(i => i.json);\nconst analytics = $('Fetch Business Metrics').all().map(i => i.json);\n\nconst summary = {\n  total_runs: workflows.reduce((s, w) => s + parseInt(w.runs), 0),\n  avg_success_rate: (workflows.reduce((s, w) => s + parseFloat(w.success_rate), 0) / workflows.length * 100).toFixed(1),\n  worst_workflow: workflows.sort((a,b) => parseFloat(a.success_rate) - parseFloat(b.success_rate))[0],\n  best_workflow: workflows.sort((a,b) => parseFloat(b.success_rate) - parseFloat(a.success_rate))[0],\n  slowest_workflow: workflows.sort((a,b) => parseFloat(b.avg_duration) - parseFloat(a.avg_duration))[0],\n  workflows,\n  analytics,\n  week_ending: new Date().toISOString().split('T')[0]\n};\nreturn summary;"
+      },
+      "id": "build-summary",
+      "name": "Build Performance Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 3000, \"system\": \"You are the performance analyst for an autonomous AI business system. Analyze data and output ONLY valid JSON with specific, actionable improvement recommendations.\", \"messages\": [{ \"role\": \"user\", \"content\": \"Analyze this week's performance data and identify improvements.\\n\\nData:\\n\" + JSON.stringify($json) + \"\\n\\nOutput JSON only:\\n{\\n  \\\"weekly_summary\\\": \\\"2-3 sentence executive summary\\\",\\n  \\\"key_wins\\\": [\\\"win1\\\", \\\"win2\\\"],\\n  \\\"key_failures\\\": [\\\"failure1\\\", \\\"failure2\\\"],\\n  \\\"root_causes\\\": [\\\"cause1\\\", \\\"cause2\\\"],\\n  \\\"improvements\\\": [{\\\"workflow\\\": string, \\\"problem\\\": string, \\\"fix\\\": string, \\\"expected_impact\\\": string}],\\n  \\\"experiments\\\": [{\\\"hypothesis\\\": string, \\\"test\\\": string, \\\"metric\\\": string}],\\n  \\\"claude_md_updates\\\": [\\\"new rule or tip to add\\\"],\\n  \\\"priority_next_week\\\": [\\\"task1\\\", \\\"task2\\\", \\\"task3\\\"]\\n}\" }] } }}"
+      },
+      "id": "claude-reflects",
+      "name": "Claude Reflects on Performance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.item.json;\nconst analysis = JSON.parse(response.content[0].text.replace(/```json|```/g,'').trim());\nreturn analysis;"
+      },
+      "id": "parse-analysis",
+      "name": "Parse Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MEM0_URL }}/memories",
+        "sendHeaders": true,
+        "headerParameters": [{ "name": "Content-Type", "value": "application/json" }],
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"messages\": [{ \"role\": \"user\", \"content\": \"Business performance week of \" + $('Build Performance Summary').item.json.week_ending }], \"metadata\": { \"type\": \"weekly_reflection\", \"wins\": $json.key_wins, \"failures\": $json.key_failures, \"patterns\": $json.root_causes } } }}"
+      },
+      "id": "save-to-mem0",
+      "name": "Save Learnings to Mem0",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AFFINE_WEBHOOK_URL }}/page",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"title\": \"Weekly Reflection — \" + $('Build Performance Summary').item.json.week_ending, \"content\": \"## Summary\\n\" + $json.weekly_summary + \"\\n\\n## Wins\\n\" + $json.key_wins.map(w => '- ' + w).join('\\n') + \"\\n\\n## Issues\\n\" + $json.key_failures.map(f => '- ' + f).join('\\n') + \"\\n\\n## Improvements Queued\\n\" + $json.improvements.map(i => '- ' + i.workflow + ': ' + i.fix).join('\\n') + \"\\n\\n## Next Week\\n\" + $json.priority_next_week.map((t,i) => (i+1)+'. '+t).join('\\n') } }}"
+      },
+      "id": "save-to-affine",
+      "name": "Save Report to AFFiNE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"embeds\": [{ \"title\": \"📊 Weekly Business Report — \" + $('Build Performance Summary').item.json.week_ending, \"color\": 5814783, \"description\": $json.weekly_summary, \"fields\": [{ \"name\": \"✅ Wins\", \"value\": $json.key_wins.slice(0,3).join('\\n') || 'None logged', \"inline\": true }, { \"name\": \"🔧 Improvements Queued\", \"value\": $json.improvements.slice(0,3).map(i => i.workflow).join('\\n') || 'None', \"inline\": true }, { \"name\": \"🎯 This Week Priority\", \"value\": $json.priority_next_week.slice(0,3).map((t,i) => (i+1)+'. '+t).join('\\n') }] }] } }}"
+      },
+      "id": "discord-report",
+      "name": "Send to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 400]
+    }
+  ],
+  "connections": {
+    "Every Sunday 9am": { "main": [[{ "node": "Fetch Week Performance", "type": "main", "index": 0 }, { "node": "Fetch Business Metrics", "type": "main", "index": 0 }]] },
+    "Fetch Week Performance": { "main": [[{ "node": "Build Performance Summary", "type": "main", "index": 0 }]] },
+    "Fetch Business Metrics": { "main": [[{ "node": "Build Performance Summary", "type": "main", "index": 0 }]] },
+    "Build Performance Summary": { "main": [[{ "node": "Claude Reflects on Performance", "type": "main", "index": 0 }]] },
+    "Claude Reflects on Performance": { "main": [[{ "node": "Parse Analysis", "type": "main", "index": 0 }]] },
+    "Parse Analysis": { "main": [[{ "node": "Save Learnings to Mem0", "type": "main", "index": 0 }, { "node": "Save Report to AFFiNE", "type": "main", "index": 0 }, { "node": "Send to Discord", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

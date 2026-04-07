@@ -1,0 +1,148 @@
+# ============================================================
+# VIDEO PIPELINE ADDITIONS
+# Add these services to your existing docker-compose.yml
+# Append under the services: key
+# ============================================================
+# Requirements: NVIDIA GPU with 8GB+ VRAM for Wan2.2 1.3B
+#               16GB+ VRAM recommended for 14B model
+#               nvidia-container-toolkit installed on host
+# Install toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+
+services:
+
+  # ──────────────────────────────────────────────
+  # COMFYUI — Video generation engine
+  # Access: http://localhost:8188
+  # API:    http://localhost:8188/api
+  # Models go in: ./comfyui-models/
+  # Wan2.2 models: download separately (see README)
+  # ──────────────────────────────────────────────
+  comfyui:
+    image: yanwk/comfyui-boot:cu124-cn
+    container_name: comfyui
+    networks: [oss-stack]
+    ports:
+      - "8188:8188"
+    volumes:
+      - ./comfyui-models:/root/ComfyUI/models
+      - ./comfyui-output:/root/ComfyUI/output
+      - ./comfyui-input:/root/ComfyUI/input
+      - ./comfyui-custom-nodes:/root/ComfyUI/custom_nodes
+    environment:
+      - CLI_ARGS=--listen 0.0.0.0 --port 8188 --enable-cors-header
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # WHISPER API — Self-hosted transcription
+  # Access: http://localhost:9000
+  # POST /asr with audio/video file
+  # ──────────────────────────────────────────────
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest-gpu
+    container_name: whisper
+    networks: [oss-stack]
+    ports:
+      - "9000:9000"
+    environment:
+      - ASR_MODEL=medium
+      - ASR_ENGINE=openai_whisper
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # VIDEO ANALYSIS API — Custom FastAPI service
+  # Wraps FFmpeg + PySceneDetect + YOLO + Claude
+  # Access: http://localhost:8500
+  # POST /analyze with video file or URL
+  # ──────────────────────────────────────────────
+  video-analyzer:
+    build:
+      context: ./video/analyzer
+      dockerfile: Dockerfile
+    container_name: video-analyzer
+    networks: [oss-stack]
+    ports:
+      - "8500:8500"
+    volumes:
+      - ./comfyui-output:/videos/input:ro
+      - ./video-analysis-output:/videos/output
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - WHISPER_URL=http://whisper:9000
+      - OUTPUT_DIR=/videos/output
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # MINIO — S3-compatible video storage
+  # Access: http://localhost:9001 (console)
+  # API:    http://localhost:9002
+  # ──────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    networks: [oss-stack]
+    ports:
+      - "9001:9001"
+      - "9002:9000"
+    volumes:
+      - minio-data:/data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_USER:-admin}
+      - MINIO_ROOT_PASSWORD=${MINIO_PASSWORD:-minio_secret_change_me}
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────
+  # QDRANT — Vector DB for semantic video search
+  # Access: http://localhost:6333
+  # Stores: video embeddings, scene descriptions
+  # ──────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    networks: [oss-stack]
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  minio-data:
+  qdrant-storage:
+
+# ============================================================
+# ENV VARS TO ADD TO .env
+# ============================================================
+# MINIO_USER=admin
+# MINIO_PASSWORD=change_this_strong_password
+# COMFYUI_URL=http://comfyui:8188
+# WHISPER_URL=http://whisper:9000
+# VIDEO_ANALYZER_URL=http://video-analyzer:8500
+# QDRANT_URL=http://qdrant:6333

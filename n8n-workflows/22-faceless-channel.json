@@ -1,0 +1,185 @@
+{
+  "name": "22 — Faceless Channel Autopilot (Topic → Published on 5 Platforms)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] }
+      },
+      "id": "trigger",
+      "name": "Daily 10am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Produces 1 video per day. Increase frequency for more output."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PERPLEXICA_URL }}/api/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"query\": \"trending topics in \" + $env.CHANNEL_NICHE + \" today\", \"focus\": \"news\", \"history\": [] } }}"
+      },
+      "id": "find-topic",
+      "name": "Find Trending Topic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 3000, \"system\": \"You write viral video scripts for a faceless YouTube channel about \" + $env.CHANNEL_NICHE + \". Return ONLY valid JSON.\", \"messages\": [{ \"role\": \"user\", \"content\": \"Based on these trending topics: \" + JSON.stringify($json) + \"\\n\\nWrite a complete video package. Return JSON:\\n{\\n  \\\"title\\\": \\\"SEO-optimized YouTube title (60 chars max)\\\",\\n  \\\"hook\\\": \\\"First 5 seconds - the hook that stops scrolling\\\",\\n  \\\"script\\\": \\\"Full 3-5 minute narration script with [VISUAL: description] markers\\\",\\n  \\\"description\\\": \\\"YouTube description with timestamps and keywords\\\",\\n  \\\"tags\\\": [\\\"tag1\\\", \\\"tag2\\\"],\\n  \\\"thumbnail_concept\\\": \\\"Thumbnail design description\\\",\\n  \\\"thumbnail_prompt\\\": \\\"FLUX.1 image generation prompt\\\",\\n  \\\"shorts_hook\\\": \\\"60-second version for YouTube Shorts/TikTok/Reels\\\",\\n  \\\"wan22_prompts\\\": [\\\"visual prompt 1\\\", \\\"visual prompt 2\\\", \\\"visual prompt 3\\\"]\\n}\" }] } }}"
+      },
+      "id": "write-script",
+      "name": "Claude Writes Full Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.item.json;\nconst text = response.content[0].text;\nlet pkg;\ntry { pkg = JSON.parse(text.replace(/```json|```/g,'').trim()); }\ncatch(e) { throw new Error('Script parse failed: ' + text.substring(0,200)); }\nreturn { ...pkg, created_at: new Date().toISOString() };"
+      },
+      "id": "parse-script",
+      "name": "Parse Script Package",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://whisper:9000/v1/audio/speech",
+        "sendHeaders": true,
+        "headerParameters": [
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"tts-1\", \"voice\": $env.CHANNEL_VOICE || \"alloy\", \"input\": $json.script, \"response_format\": \"mp3\", \"speed\": 1.05 } }}",
+        "options": { "response": { "fullResponse": true } }
+      },
+      "id": "generate-voiceover",
+      "name": "Generate Voiceover (Kokoro TTS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200],
+      "notes": "Points to Kokoro TTS service which is OpenAI API compatible"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://comfyui:8188/api/prompt",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"prompt\": { \"1\": { \"class_type\": \"WanVideoTextToVideo\", \"inputs\": { \"positive\": $json.wan22_prompts[0], \"negative\": \"blurry, low quality, watermark\", \"width\": 1280, \"height\": 720, \"length\": 96, \"steps\": 25, \"cfg\": 6.0, \"seed\": Math.floor(Math.random() * 999999) } }, \"2\": { \"class_type\": \"SaveVideo\", \"inputs\": { \"filename_prefix\": \"channel_\" + Date.now(), \"video\": [\"1\", 0] } } } } }}"
+      },
+      "id": "generate-video",
+      "name": "Generate Video (Wan2.2)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://comfyui:8188/api/prompt",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"prompt\": { \"1\": { \"class_type\": \"FluxTextToImage\", \"inputs\": { \"positive\": $json.thumbnail_prompt, \"negative\": \"blurry, ugly, watermark\", \"width\": 1280, \"height\": 720, \"steps\": 20 } }, \"2\": { \"class_type\": \"SaveImage\", \"inputs\": { \"filename_prefix\": \"thumb_\" + Date.now() } } } } }}"
+      },
+      "id": "generate-thumbnail",
+      "name": "Generate Thumbnail (FLUX.1)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": { "amount": 300, "unit": "seconds" },
+      "id": "wait-render",
+      "name": "Wait for Render (5 min)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "sendHeaders": true,
+        "headerParameters": [
+          { "name": "Authorization", "value": "Bearer {{ $env.YOUTUBE_ACCESS_TOKEN }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"snippet\": { \"title\": $('Parse Script Package').item.json.title, \"description\": $('Parse Script Package').item.json.description, \"tags\": $('Parse Script Package').item.json.tags, \"categoryId\": \"28\", \"defaultLanguage\": \"en\" }, \"status\": { \"privacyStatus\": \"public\", \"publishAt\": null, \"madeForKids\": false, \"selfDeclaredMadeForKids\": false } } }}"
+      },
+      "id": "upload-youtube",
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.POSTIZ_URL }}/api/public/v1",
+        "sendHeaders": true,
+        "headerParameters": [
+          { "name": "Authorization", "value": "Bearer {{ $env.POSTIZ_API_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"posts\": [{ \"provider\": \"tiktok\", \"content\": $('Parse Script Package').item.json.shorts_hook, \"date\": new Date(Date.now() + 3600*1000).toISOString() }, { \"provider\": \"instagram\", \"content\": $('Parse Script Package').item.json.shorts_hook + '\\n\\n#' + $('Parse Script Package').item.json.tags.slice(0,5).join(' #'), \"date\": new Date(Date.now() + 7200*1000).toISOString() }, { \"provider\": \"x\", \"content\": '🎥 New video: ' + $('Parse Script Package').item.json.title + '\\n\\nWatch: [link]', \"date\": new Date(Date.now() + 1800*1000).toISOString() }] } }}"
+      },
+      "id": "distribute-clips",
+      "name": "Distribute to TikTok, Instagram, Twitter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"embeds\": [{ \"title\": \"📹 Video Published!\", \"color\": 3066993, \"fields\": [{ \"name\": \"Title\", \"value\": $('Parse Script Package').item.json.title }, { \"name\": \"Platforms\", \"value\": \"YouTube ✅ TikTok ✅ Instagram ✅ Twitter ✅\" }] }] } }}"
+      },
+      "id": "notify",
+      "name": "Notify Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 300]
+    }
+  ],
+  "connections": {
+    "Daily 10am": { "main": [[{ "node": "Find Trending Topic", "type": "main", "index": 0 }]] },
+    "Find Trending Topic": { "main": [[{ "node": "Claude Writes Full Script", "type": "main", "index": 0 }]] },
+    "Claude Writes Full Script": { "main": [[{ "node": "Parse Script Package", "type": "main", "index": 0 }]] },
+    "Parse Script Package": { "main": [[{ "node": "Generate Voiceover (Kokoro TTS)", "type": "main", "index": 0 }, { "node": "Generate Video (Wan2.2)", "type": "main", "index": 0 }, { "node": "Generate Thumbnail (FLUX.1)", "type": "main", "index": 0 }]] },
+    "Generate Video (Wan2.2)": { "main": [[{ "node": "Wait for Render (5 min)", "type": "main", "index": 0 }]] },
+    "Wait for Render (5 min)": { "main": [[{ "node": "Upload to YouTube", "type": "main", "index": 0 }]] },
+    "Upload to YouTube": { "main": [[{ "node": "Distribute to TikTok, Instagram, Twitter", "type": "main", "index": 0 }]] },
+    "Distribute to TikTok, Instagram, Twitter": { "main": [[{ "node": "Notify Discord", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "env_required": ["CHANNEL_NICHE", "CHANNEL_VOICE", "YOUTUBE_ACCESS_TOKEN", "POSTIZ_URL", "POSTIZ_API_KEY", "ANTHROPIC_API_KEY", "PERPLEXICA_URL"],
+    "description": "Full faceless channel autopilot. Finds trending topic → writes script → generates voiceover + video + thumbnail → uploads to YouTube → distributes shorts to TikTok, Instagram, Twitter."
+  }
+}

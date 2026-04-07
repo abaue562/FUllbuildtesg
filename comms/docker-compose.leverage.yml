@@ -1,0 +1,185 @@
+# ============================================================
+# LEVERAGE ADDITIONS — Phase 2 stack
+# Add these after the core stack is running
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────
+  # MEM0 — persistent AI memory layer
+  # Access: http://localhost:8100/docs
+  # github.com/mem0ai/mem0
+  # Gives Claude persistent memory across all sessions
+  # ──────────────────────────────────────────────
+  mem0:
+    image: mem0ai/mem0:latest
+    container_name: mem0
+    networks: [oss-stack]
+    ports:
+      - "8100:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}          # For embeddings
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}    # For memory extraction
+      - VECTOR_STORE_PROVIDER=qdrant
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - HISTORY_DB_PATH=/app/history/mem0.db
+    volumes:
+      - mem0-data:/app/history
+    depends_on: [qdrant]
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # FIRECRAWL — AI-native web scraper
+  # Access: http://localhost:3500/v1
+  # github.com/mendableai/firecrawl
+  # Turn any URL into clean markdown for Claude
+  # ──────────────────────────────────────────────
+  firecrawl-redis:
+    image: redis:7-alpine
+    container_name: firecrawl-redis
+    networks: [oss-stack]
+    restart: unless-stopped
+
+  firecrawl-playwright:
+    image: ghcr.io/mendableai/firecrawl-playwright-service:latest
+    container_name: firecrawl-playwright
+    networks: [oss-stack]
+    restart: unless-stopped
+
+  firecrawl:
+    image: ghcr.io/mendableai/firecrawl:latest
+    container_name: firecrawl
+    networks: [oss-stack]
+    ports:
+      - "3500:3002"
+    environment:
+      - REDIS_URL=redis://firecrawl-redis:6379
+      - PLAYWRIGHT_MICROSERVICE_URL=http://firecrawl-playwright:3000
+      - USE_DB_AUTHENTICATION=false
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    depends_on: [firecrawl-redis, firecrawl-playwright]
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # UPTIME KUMA — uptime monitoring
+  # Access: http://localhost:3600
+  # github.com/louislam/uptime-kuma
+  # Monitor all your services, alert on failure
+  # ──────────────────────────────────────────────
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: uptime-kuma
+    networks: [oss-stack]
+    ports:
+      - "3600:3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # FRESHRSS — RSS/content monitoring
+  # Access: http://localhost:3700
+  # github.com/FreshRSS/FreshRSS
+  # Monitor competitor blogs, industry news, mentions
+  # ──────────────────────────────────────────────
+  freshrss:
+    image: freshrss/freshrss:latest
+    container_name: freshrss
+    networks: [oss-stack]
+    ports:
+      - "3700:80"
+    volumes:
+      - freshrss-data:/var/www/FreshRSS/data
+      - freshrss-extensions:/var/www/FreshRSS/extensions
+    environment:
+      - CRON_MIN=*/15
+      - TZ=America/New_York
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # FORMBRICKS — open source Typeform
+  # Access: http://localhost:3800
+  # github.com/formbricks/formbricks
+  # Lead capture, NPS, surveys, onboarding
+  # ──────────────────────────────────────────────
+  formbricks:
+    image: ghcr.io/formbricks/formbricks:latest
+    container_name: formbricks
+    networks: [oss-stack]
+    depends_on:
+      - surfsense-db  # reuse existing postgres
+    ports:
+      - "3800:3000"
+    environment:
+      - DATABASE_URL=postgresql://surfsense:${SURFSENSE_DB_PASSWORD}@surfsense-db:5432/formbricks
+      - NEXTAUTH_SECRET=${FORMBRICKS_SECRET:-change_me_formbricks_secret}
+      - NEXTAUTH_URL=http://${SERVER_IP:-localhost}:3800
+      - ENCRYPTION_KEY=${FORMBRICKS_ENCRYPT:-change_me_32char_encrypt_key}
+      - WEBAPP_URL=http://${SERVER_IP:-localhost}:3800
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # GROWTHBOOK — A/B testing + feature flags
+  # Access: http://localhost:3900
+  # github.com/growthbook/growthbook
+  # Statistical A/B testing for landing pages, emails
+  # ──────────────────────────────────────────────
+  growthbook:
+    image: growthbook/growthbook:latest
+    container_name: growthbook
+    networks: [oss-stack]
+    ports:
+      - "3900:3000"
+      - "3901:3100"  # API port
+    volumes:
+      - growthbook-data:/usr/local/src/app/packages/back-end/uploads
+    environment:
+      - MONGODB_URI=mongodb://textbee-db:27017/growthbook
+      - APP_ORIGIN=http://${SERVER_IP:-localhost}:3900
+      - API_HOST=http://${SERVER_IP:-localhost}:3901
+      - JWT_SECRET=${GROWTHBOOK_JWT:-change_me_growthbook}
+      - ENCRYPTION_KEY=${GROWTHBOOK_ENCRYPT:-change_me_growthbook_encrypt}
+    depends_on: [textbee-db]
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # REMBG — background removal API
+  # Access: http://localhost:7000
+  # Remove backgrounds from product images
+  # ──────────────────────────────────────────────
+  rembg:
+    image: danielgatis/rembg:latest
+    container_name: rembg
+    networks: [oss-stack]
+    ports:
+      - "7000:5000"
+    command: s
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # NOCODB — Airtable on your Postgres
+  # Access: http://localhost:8080 (existing)
+  # If not already running, add:
+  # ──────────────────────────────────────────────
+  nocodb:
+    image: nocodb/nocodb:latest
+    container_name: nocodb
+    networks: [oss-stack]
+    ports:
+      - "4000:8080"
+    environment:
+      - NC_DB=pg://surfsense-db:5432?u=surfsense&p=${SURFSENSE_DB_PASSWORD}&d=surfsense
+      - NC_AUTH_JWT_SECRET=${NOCODB_JWT:-change_me_nocodb}
+    depends_on: [surfsense-db]
+    volumes:
+      - nocodb-data:/usr/app/data
+    restart: unless-stopped
+
+volumes:
+  mem0-data:
+  uptime-kuma-data:
+  freshrss-data:
+  freshrss-extensions:
+  growthbook-data:
+  nocodb-data:

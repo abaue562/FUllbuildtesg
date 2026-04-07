@@ -1,0 +1,131 @@
+{
+  "name": "08 — Video Analysis Pipeline (Upload/URL → Whisper → Claude → SurfSense + AFFiNE)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Analyze Video Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notes": "POST: {url, prompt, project, tags} — or multipart file upload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_ANALYZER_URL }}/analyze",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"url\": $json.url, \"prompt\": $json.prompt || \"Analyze this video comprehensively\", \"extract_frames_every\": 30, \"max_frames\": 16, \"detect_scenes\": true, \"transcribe\": true} }}",
+        "options": { "timeout": 600000 }
+      },
+      "id": "run-analysis",
+      "name": "Run Video Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const analysis = $input.item.json;\nconst input = $('Analyze Video Webhook').item.json;\nconst date = new Date().toISOString().split('T')[0];\nconst a = analysis.analysis || {};\n\nconst markdown = `# Video Analysis: ${a.title || 'Untitled'}\\n_${date}_\\n\\n## Summary\\n${a.summary || ''}\\n\\n## Content Type\\n${a.content_type || 'unknown'}\\n\\n## Topics\\n${(a.topics || []).map(t => '- ' + t).join('\\n')}\\n\\n## Key Scenes\\n${(a.key_scenes || []).map(s => `- **${s.timestamp}s**: ${s.description}`).join('\\n')}\\n\\n## Tags\\n${(a.tags || []).map(t => '`' + t + '`').join(' ')}\\n\\n## Transcript\\n${analysis.transcript ? analysis.transcript.substring(0, 2000) : '_No transcript_'}\\n\\n## Metadata\\n- Duration: ${analysis.metadata?.duration}s\\n- Resolution: ${analysis.metadata?.width}x${analysis.metadata?.height}\\n- Quality score: ${a.quality_score}/10\\n\\n_Auto-analyzed by video pipeline_`;\n\nreturn {\n  title: `Video: ${a.title || input.url || 'Upload'} — ${date}`,\n  markdown,\n  surfsense_content: a.surfsense_summary || a.summary || '',\n  tags: [...(a.tags || []), 'video-analysis', input.project || 'default'],\n  project: input.project || 'default',\n  quality_score: a.quality_score,\n  topics: a.topics || [],\n  analysis: a\n};"
+      },
+      "id": "format-results",
+      "name": "Format Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AFFINE_URL }}/api/workspaces/{{ $env.AFFINE_WORKSPACE_ID }}/docs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.AFFINE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": $json.title, \"content\": $json.markdown} }}",
+        "options": {}
+      },
+      "id": "save-affine",
+      "name": "Save to AFFiNE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SURFSENSE_URL }}/api/documents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.SURFSENSE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": $json.title, \"content\": $json.surfsense_content, \"tags\": $json.tags, \"searchSpaceId\": $env.SURFSENSE_SPACE_ID} }}",
+        "options": {}
+      },
+      "id": "index-surfsense",
+      "name": "Index in SurfSense",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 380]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.QDRANT_URL }}/collections/videos/points",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"points\": [{\"id\": Date.now(), \"payload\": {\"title\": $json.title, \"summary\": $json.surfsense_content, \"tags\": $json.tags, \"project\": $json.project, \"quality\": $json.quality_score, \"topics\": $json.topics}}]} }}",
+        "options": {}
+      },
+      "id": "store-qdrant",
+      "name": "Store in Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 540]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"status\": \"analyzed\", \"title\": $('Format Results').item.json.title, \"quality_score\": $('Format Results').item.json.quality_score, \"topics\": $('Format Results').item.json.topics} }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 380]
+    }
+  ],
+  "connections": {
+    "Analyze Video Webhook": { "main": [[{ "node": "Run Video Analysis", "type": "main", "index": 0 }]] },
+    "Run Video Analysis": { "main": [[{ "node": "Format Results", "type": "main", "index": 0 }]] },
+    "Format Results": { "main": [[{ "node": "Save to AFFiNE", "type": "main", "index": 0 }, { "node": "Index in SurfSense", "type": "main", "index": 0 }, { "node": "Store in Qdrant", "type": "main", "index": 0 }]] },
+    "Save to AFFiNE": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "POST to /webhook/analyze-video with {url, prompt, project}. Transcribes, detects scenes, extracts frames, Claude analyzes → saves to AFFiNE + SurfSense + Qdrant.",
+    "usage": "curl -X POST http://localhost:5678/webhook/analyze-video -H 'Content-Type: application/json' -d '{\"url\": \"https://youtube.com/watch?v=xyz\", \"prompt\": \"What products are featured?\", \"project\": \"MarketResearch\"}'"
+  }
+}

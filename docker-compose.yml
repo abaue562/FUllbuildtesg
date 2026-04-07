@@ -1,0 +1,264 @@
+version: "3.8"
+
+# ============================================================
+# FULL OSS DEV + RESEARCH STACK
+# Replaces: Perplexity, NotebookLM, Cursor, Notion, Vercel, v0
+# Requirements: 4GB+ RAM, 40GB+ disk, Docker + Docker Compose
+# Usage: docker compose up -d
+# ============================================================
+
+networks:
+  oss-stack:
+    driver: bridge
+
+volumes:
+  # Perplexica
+  perplexica-backend:
+  # SearxNG (search backend for Perplexica)
+  searxng-data:
+  # SurfSense (NotebookLM replacement)
+  surfsense-db:
+  surfsense-uploads:
+  # AFFiNE (Notion replacement)
+  affine-db:
+  affine-storage:
+  affine-config:
+  # n8n (automation)
+  n8n-data:
+  # AnythingLLM (doc Q&A)
+  anythingllm-storage:
+  # Coolify (Vercel replacement) - installed separately, see notes
+  coolify-db:
+  coolify-redis:
+  coolify-storage:
+
+services:
+
+  # ──────────────────────────────────────────────
+  # 1. SEARXNG — private search engine for Perplexica
+  # ──────────────────────────────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    networks: [oss-stack]
+    volumes:
+      - searxng-data:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────
+  # 2. PERPLEXICA — AI search engine (Perplexity replacement)
+  #    Access: http://localhost:3001
+  #    Docs: github.com/ItzCrazyKns/Perplexica
+  # ──────────────────────────────────────────────
+  perplexica-backend:
+    image: itzcrazykns/perplexica-backend:latest
+    container_name: perplexica-backend
+    networks: [oss-stack]
+    depends_on:
+      searxng:
+        condition: service_healthy
+    volumes:
+      - perplexica-backend:/home/perplexica/data
+    environment:
+      - SEARXNG_API_URL=http://searxng:8080
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_API_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  perplexica-frontend:
+    image: itzcrazykns/perplexica-frontend:latest
+    container_name: perplexica-frontend
+    networks: [oss-stack]
+    depends_on:
+      - perplexica-backend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://perplexica-backend:3001
+      - NEXT_PUBLIC_WS_URL=ws://perplexica-backend:3001
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # 3. SURFSENSE — NotebookLM + Perplexity replacement
+  #    Access: http://localhost:3002
+  #    Docs: github.com/MODSetter/SurfSense
+  #    Connects to: Notion, GitHub, Slack, Google Drive, YouTube, Jira
+  # ──────────────────────────────────────────────
+  surfsense-db:
+    image: postgres:16-alpine
+    container_name: surfsense-db
+    networks: [oss-stack]
+    volumes:
+      - surfsense-db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=surfsense
+      - POSTGRES_USER=surfsense
+      - POSTGRES_PASSWORD=${SURFSENSE_DB_PASSWORD:-surfsense_secret_change_me}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U surfsense"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  surfsense:
+    image: surfsenseai/surfsense:latest
+    container_name: surfsense
+    networks: [oss-stack]
+    depends_on:
+      surfsense-db:
+        condition: service_healthy
+    volumes:
+      - surfsense-uploads:/app/uploads
+    environment:
+      - DATABASE_URL=postgresql://surfsense:${SURFSENSE_DB_PASSWORD:-surfsense_secret_change_me}@surfsense-db:5432/surfsense
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - SECRET_KEY=${SURFSENSE_SECRET:-change_this_secret_key_32chars_min}
+    ports:
+      - "3002:3000"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # 4. ANYTHINGLLM — doc Q&A + RAG (NotebookLM alternative)
+  #    Access: http://localhost:3003
+  #    Supports: PDFs, docs, URLs, GitHub repos, YouTube
+  #    Works with Ollama for fully local inference
+  # ──────────────────────────────────────────────
+  anythingllm:
+    image: mintplexlabs/anythingllm:latest
+    container_name: anythingllm
+    networks: [oss-stack]
+    volumes:
+      - anythingllm-storage:/app/server/storage
+    environment:
+      - STORAGE_DIR=/app/server/storage
+      - UID=1000
+      - GID=1000
+    ports:
+      - "3003:3001"
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cap_add:
+      - SYS_ADMIN
+
+  # ──────────────────────────────────────────────
+  # 5. AFFINE — Notion replacement (docs + whiteboard + DB)
+  #    Access: http://localhost:3004
+  #    Docs: github.com/toeverything/AFFiNE
+  # ──────────────────────────────────────────────
+  affine-db:
+    image: postgres:16-alpine
+    container_name: affine-db
+    networks: [oss-stack]
+    volumes:
+      - affine-db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=affine
+      - POSTGRES_USER=affine
+      - POSTGRES_PASSWORD=${AFFINE_DB_PASSWORD:-affine_secret_change_me}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U affine"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  affine-redis:
+    image: redis:7-alpine
+    container_name: affine-redis
+    networks: [oss-stack]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  affine:
+    image: ghcr.io/toeverything/affine-graphql:stable
+    container_name: affine
+    networks: [oss-stack]
+    depends_on:
+      affine-db:
+        condition: service_healthy
+      affine-redis:
+        condition: service_healthy
+    volumes:
+      - affine-storage:/root/.affine/storage
+      - affine-config:/root/.affine/config
+    environment:
+      - NODE_OPTIONS=--import=./scripts/register.js
+      - AFFINE_CONFIG_PATH=/root/.affine/config
+      - REDIS_SERVER_HOST=affine-redis
+      - DATABASE_URL=postgresql://affine:${AFFINE_DB_PASSWORD:-affine_secret_change_me}@affine-db:5432/affine
+      - NODE_ENV=production
+      - AFFINE_ADMIN_EMAIL=${AFFINE_ADMIN_EMAIL:-admin@localhost}
+      - AFFINE_ADMIN_PASSWORD=${AFFINE_ADMIN_PASSWORD:-Admin1234!}
+    ports:
+      - "3004:3010"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # 6. N8N — workflow automation (already in your stack)
+  #    Access: http://localhost:5678
+  #    Automates: research pipelines, deploy hooks, CRM, outreach
+  # ──────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    networks: [oss-stack]
+    volumes:
+      - n8n-data:/home/node/.n8n
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-change_me_n8n}
+      - WEBHOOK_URL=http://${SERVER_IP:-localhost}:5678/
+      - GENERIC_TIMEZONE=America/New_York
+    ports:
+      - "5678:5678"
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # 7. COOLIFY DB + REDIS (Vercel replacement core)
+  #    NOTE: Coolify itself is installed via its own script (see below)
+  #    These are the backing services it needs if you self-manage them
+  # ──────────────────────────────────────────────
+  coolify-db:
+    image: postgres:16-alpine
+    container_name: coolify-db
+    networks: [oss-stack]
+    volumes:
+      - coolify-db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=coolify
+      - POSTGRES_USER=coolify
+      - POSTGRES_PASSWORD=${COOLIFY_DB_PASSWORD:-coolify_secret_change_me}
+    restart: unless-stopped
+
+  coolify-redis:
+    image: redis:7-alpine
+    container_name: coolify-redis
+    networks: [oss-stack]
+    volumes:
+      - coolify-redis:/data
+    restart: unless-stopped
+    command: redis-server --requirepass ${COOLIFY_REDIS_PASSWORD:-coolify_redis_change_me}

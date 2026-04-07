@@ -1,0 +1,244 @@
+{
+  "name": "20 — Directory SEO Engine (Scrape → Build → Submit → Index)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "build-directory",
+        "responseMode": "lastNode"
+      },
+      "id": "trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notes": "POST: {niche, target_url, brand_name, brand_url, listing_count}"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FIRECRAWL_URL }}/v1/crawl",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.FIRECRAWL_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"url\": $json.target_url, \"limit\": $json.listing_count || 500, \"scrapeOptions\": { \"formats\": [\"markdown\", \"links\"] }, \"excludePaths\": [\"/login\", \"/signup\", \"/cart\"] } }}"
+      },
+      "id": "firecrawl-scrape",
+      "name": "Firecrawl Scrapes Niche Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FIRECRAWL_URL }}/v1/crawl/={{ $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.FIRECRAWL_API_KEY }}" }
+          ]
+        }
+      },
+      "id": "poll-crawl",
+      "name": "Poll Until Complete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 4000, \"system\": \"You are a programmatic SEO expert. Extract structured data and output ONLY valid JSON.\", \"messages\": [{ \"role\": \"user\", \"content\": \"Extract structured listing data from this crawled content for a '\" + $('Manual Trigger').item.json.niche + \"' directory.\\n\\nContent:\\n\" + JSON.stringify($json.data?.slice(0,50)) + \"\\n\\nReturn JSON: { \\\"listings\\\": [{\\\"name\\\": string, \\\"slug\\\": string, \\\"description\\\": string, \\\"category\\\": string, \\\"subcategory\\\": string, \\\"tags\\\": string[], \\\"website\\\": string, \\\"location\\\": string, \\\"rating\\\": number|null, \\\"highlights\\\": string[]}], \\\"categories\\\": string[], \\\"total_count\\\": number }\" }] } }}"
+      },
+      "id": "structure-data",
+      "name": "Claude Structures Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 4000, \"messages\": [{ \"role\": \"user\", \"content\": \"Design a programmatic SEO directory for the '\" + $('Manual Trigger').item.json.niche + \"' niche.\\nBrand sponsor: \" + $('Manual Trigger').item.json.brand_name + \" (\" + $('Manual Trigger').item.json.brand_url + \")\\nData: \" + $json.content[0].text.substring(0, 1000) + \"\\n\\nReturn a CLAUDE.md-style plan with:\\n1. URL structure\\n2. Page types and templates\\n3. Postgres schema (SQL)\\n4. SEO strategy (meta titles, schema.org types)\\n5. Brand integration points\\n6. Long-tail keyword patterns\\n7. Estimated pages to generate\\n\\nBe specific and actionable.\" }] } }}"
+      },
+      "id": "build-plan",
+      "name": "Claude Plans Directory Architecture",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('Claude Plans Directory Architecture').item.json.content[0].text;\nconst structuredData = JSON.parse($('Claude Structures Data').item.json.content[0].text.replace(/```json|```/g,'').trim());\nconst input = $('Manual Trigger').item.json;\n\n// Store to AFFiNE via filesystem (Claude Code will read this)\nconst claudeMd = `# DIRECTORY BUILD TASK\n## Niche: ${input.niche}\n## Brand: ${input.brand_name} (${input.brand_url})\n## Listings: ${structuredData.total_count}\n## Categories: ${structuredData.categories?.join(', ')}\n\n## ARCHITECTURE PLAN\n${plan}\n\n## DATA SNAPSHOT (first 5 listings)\n${JSON.stringify(structuredData.listings?.slice(0,5), null, 2)}\n\n## CLAUDE CODE INSTRUCTIONS\n\nBuild this directory with:\n1. Next.js 14 App Router\n2. Postgres via Prisma (schema from plan above)\n3. Meilisearch for instant search\n4. All listing pages: /[category]/[slug]\n5. Compare pages: /compare/[slug1]-vs-[slug2]\n6. Category pages: /[category]\n7. Schema.org JSON-LD on every page\n8. Brand sponsor widget on every listing (${input.brand_name})\n9. sitemap.xml auto-generated\n10. robots.txt with sitemap reference\n\nRun: AGENT: --dangerouslySkipPermissions build this entire directory`;\n\nreturn {\n  claudeMd,\n  listings: structuredData.listings,\n  categories: structuredData.categories,\n  niche: input.niche,\n  brand: input.brand_name,\n  brand_url: input.brand_url\n};"
+      },
+      "id": "prepare-build",
+      "name": "Prepare Claude Code Build",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/claude-code-task",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"task\": \"BUILD DIRECTORY\", \"instructions\": $json.claudeMd, \"project_name\": $json.niche.toLowerCase().replace(/ /g, '-') + '-directory', \"deploy_to_coolify\": true } }}"
+      },
+      "id": "trigger-build",
+      "name": "Trigger Claude Code Build",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": { "amount": 300, "unit": "seconds" },
+      "id": "wait-build",
+      "name": "Wait for Build (5 min)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Directory submission targets with their submission URLs\nconst directories = [\n  { name: 'ProvenExpert', url: 'https://www.provenexpert.com', api: null, method: 'form' },\n  { name: 'AlternativeTo', url: 'https://alternativeto.net/platform/web-apps/suggest', api: null, method: 'form' },\n  { name: 'Product Hunt', url: 'https://www.producthunt.com/posts/new', api: 'https://api.producthunt.com', method: 'api' },\n  { name: 'BetaList', url: 'https://betalist.com/startups/new', api: null, method: 'form' },\n  { name: 'Crunchbase', url: 'https://www.crunchbase.com/add-company', api: null, method: 'form' },\n  { name: 'AppSumo', url: 'https://appsumo.com/partner', api: null, method: 'form' },\n  { name: 'G2', url: 'https://www.g2.com/products/new', api: null, method: 'form' },\n  { name: 'Capterra', url: 'https://www.capterra.com/vendors/sign-up', api: null, method: 'form' },\n  { name: 'GetApp', url: 'https://www.getapp.com/directory/submit', api: null, method: 'form' },\n  { name: 'SoftwareSuggest', url: 'https://www.softwaresuggest.com/vendor', api: null, method: 'form' }\n];\nconst input = $('Prepare Claude Code Build').item.json;\nreturn directories.map(d => ({ ...d, site_name: input.niche + ' Directory', brand: input.brand, niche: input.niche }));"
+      },
+      "id": "prep-submissions",
+      "name": "Prepare Submission List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 500, \"messages\": [{ \"role\": \"user\", \"content\": \"Write submission copy for directory '\" + $json.site_name + \"' in niche '\" + $json.niche + \"'.\\nReturn JSON: {\\\"tagline\\\": string (10 words max), \\\"description\\\": string (50 words), \\\"category\\\": string, \\\"keywords\\\": string[]}\" }] } }}"
+      },
+      "id": "write-submission-copy",
+      "name": "Claude Writes Submission Copy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build IndexNow submission payload\n// Assumes directory is deployed at: https://[niche]-directory.yourdomain.com\nconst input = $('Prepare Claude Code Build').item.json;\nconst domain = input.niche.toLowerCase().replace(/ /g,'-') + '-directory.' + ($env.BASE_DOMAIN || 'yourdomain.com');\nconst listings = input.listings || [];\n\n// Generate URL list for all pages\nconst urls = [];\nurls.push('https://' + domain); // homepage\nconst categories = [...new Set(listings.map(l => l.category))];\ncategories.forEach(cat => {\n  if (cat) urls.push('https://' + domain + '/' + cat.toLowerCase().replace(/ /g,'-'));\n});\nlistings.slice(0, 200).forEach(l => {\n  if (l.category && l.slug) {\n    urls.push('https://' + domain + '/' + l.category.toLowerCase().replace(/ /g,'-') + '/' + l.slug);\n  }\n});\n\n// Batch into groups of 100 for drip submission\nconst batches = [];\nfor (let i = 0; i < urls.length; i += 100) {\n  batches.push(urls.slice(i, i+100));\n}\nreturn batches.map((batch, i) => ({ batch_number: i+1, total_batches: batches.length, urls: batch, domain, key: $env.INDEXNOW_KEY || 'your-indexnow-key' }));"
+      },
+      "id": "prep-indexnow",
+      "name": "Prepare IndexNow Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": { "batchSize": 1 },
+      "id": "split-batches",
+      "name": "Process Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": { "amount": "={{ $json.batch_number * 24 }}", "unit": "hours" },
+      "id": "drip-delay",
+      "name": "Drip Delay (1 batch/day)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2880, 300],
+      "notes": "Drip: submit 100 URLs per day to avoid spam signals"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.bing.com/indexnow",
+        "sendHeaders": true,
+        "headerParameters": [{ "name": "Content-Type", "value": "application/json; charset=utf-8" }],
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"host\": $json.domain, \"key\": $json.key, \"keyLocation\": \"https://\" + $json.domain + \"/\" + $json.key + \".txt\", \"urlList\": $json.urls } }}"
+      },
+      "id": "indexnow-submit",
+      "name": "IndexNow → Bing + ChatGPT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3100, 300],
+      "notes": "Single submission → hits Bing, ChatGPT, Yandex, Naver simultaneously"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.speedyindex.com/v1/submit",
+        "sendHeaders": true,
+        "headerParameters": [
+          { "name": "Authorization", "value": "Bearer {{ $env.SPEEDYINDEX_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"urls\": $json.urls } }}"
+      },
+      "id": "speedyindex-submit",
+      "name": "SpeedyIndex → Google",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3100, 460],
+      "notes": "Paid service (~$0.001/URL) — accelerates Google indexing"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Firecrawl Scrapes Niche Data", "type": "main", "index": 0 }]] },
+    "Firecrawl Scrapes Niche Data": { "main": [[{ "node": "Poll Until Complete", "type": "main", "index": 0 }]] },
+    "Poll Until Complete": { "main": [[{ "node": "Claude Structures Data", "type": "main", "index": 0 }]] },
+    "Claude Structures Data": { "main": [[{ "node": "Claude Plans Directory Architecture", "type": "main", "index": 0 }]] },
+    "Claude Plans Directory Architecture": { "main": [[{ "node": "Prepare Claude Code Build", "type": "main", "index": 0 }]] },
+    "Prepare Claude Code Build": { "main": [[{ "node": "Trigger Claude Code Build", "type": "main", "index": 0 }]] },
+    "Trigger Claude Code Build": { "main": [[{ "node": "Wait for Build (5 min)", "type": "main", "index": 0 }]] },
+    "Wait for Build (5 min)": { "main": [[{ "node": "Prepare Submission List", "type": "main", "index": 0 }]] },
+    "Prepare Submission List": { "main": [[{ "node": "Claude Writes Submission Copy", "type": "main", "index": 0 }]] },
+    "Claude Writes Submission Copy": { "main": [[{ "node": "Prepare IndexNow Batches", "type": "main", "index": 0 }]] },
+    "Prepare IndexNow Batches": { "main": [[{ "node": "Process Batches", "type": "main", "index": 0 }]] },
+    "Process Batches": { "main": [[{ "node": "Drip Delay (1 batch/day)", "type": "main", "index": 0 }]] },
+    "Drip Delay (1 batch/day)": { "main": [[{ "node": "IndexNow → Bing + ChatGPT", "type": "main", "index": 0 }, { "node": "SpeedyIndex → Google", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

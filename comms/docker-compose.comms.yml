@@ -1,0 +1,236 @@
+# ============================================================
+# PHONE + SIM GATEWAY STACK
+# Adds to existing docker-compose.yml
+# ============================================================
+# HARDWARE REQUIRED:
+#   - Android phone(s) with android-sms-gateway APK installed
+#   - APK: github.com/capcom6/android-sms-gateway/releases
+#   - Each phone registers to this backend server
+#
+# SETUP:
+#   1. Install APK on Android phone
+#   2. In the app: Settings → Server → point to http://YOUR_IP:3400
+#   3. The phone appears in the TextBee dashboard
+#   4. Wire n8n to POST /api/v1/message for outbound SMS
+
+services:
+
+  # ──────────────────────────────────────────────
+  # TEXTBEE — SMS gateway dashboard + API
+  # Access: http://localhost:3400
+  # API:    POST /api/v1/gateway/devices/{id}/send-sms
+  # Docs:   github.com/vernu/textbee
+  # ──────────────────────────────────────────────
+  textbee-db:
+    image: mongo:7
+    container_name: textbee-db
+    networks: [oss-stack]
+    volumes:
+      - textbee-db:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  textbee:
+    image: vernu/textbee:latest
+    container_name: textbee
+    networks: [oss-stack]
+    depends_on:
+      textbee-db:
+        condition: service_healthy
+    ports:
+      - "3400:3000"
+    environment:
+      - MONGO_URI=mongodb://textbee-db:27017/textbee
+      - JWT_SECRET=${TEXTBEE_JWT_SECRET:-change_this_jwt_secret}
+      - NEXTAUTH_SECRET=${TEXTBEE_NEXTAUTH_SECRET:-change_this_nextauth_secret}
+      - NEXTAUTH_URL=http://${SERVER_IP:-localhost}:3400
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # ANDROID-SMS-GATEWAY server
+  # Alternative / additional SMS backend
+  # github.com/capcom6/android-sms-gateway
+  # Points Android phones to this server
+  # ──────────────────────────────────────────────
+  sms-gateway:
+    image: capcom6/android-sms-gateway:latest
+    container_name: sms-gateway
+    networks: [oss-stack]
+    ports:
+      - "3401:3000"
+    volumes:
+      - sms-gateway-data:/data
+    environment:
+      - GATEWAY_USERNAME=${SMS_GW_USER:-admin}
+      - GATEWAY_PASSWORD=${SMS_GW_PASS:-change_me_sms}
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # FONOSTER — programmable voice + SMS (Twilio OSS)
+  # Access: localhost:50051 (gRPC API)
+  # Web console: localhost:3002
+  # github.com/fonoster/fonoster
+  # ──────────────────────────────────────────────
+  routr:
+    image: fonoster/routr-one:latest
+    container_name: routr
+    networks: [oss-stack]
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "5061:5061/tcp"
+    volumes:
+      - routr-data:/etc/routr
+    restart: unless-stopped
+
+  fonoster:
+    image: fonoster/fonoster:latest
+    container_name: fonoster
+    networks: [oss-stack]
+    depends_on: [routr]
+    ports:
+      - "50051:50051"
+    environment:
+      - ROUTR_API_HOST=routr
+      - LOGS_LEVEL=info
+    volumes:
+      - fonoster-data:/home/fonoster/.fonoster
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # CHATWOOT — omnichannel inbox
+  # Access: http://localhost:3200
+  # github.com/chatwoot/chatwoot
+  # Channels: WhatsApp, SMS, email, web chat, Telegram
+  # ──────────────────────────────────────────────
+  chatwoot-db:
+    image: postgres:16-alpine
+    container_name: chatwoot-db
+    networks: [oss-stack]
+    environment:
+      - POSTGRES_DB=chatwoot
+      - POSTGRES_USER=chatwoot
+      - POSTGRES_PASSWORD=${CHATWOOT_DB_PASS:-chatwoot_secret}
+    volumes:
+      - chatwoot-db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatwoot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chatwoot-redis:
+    image: redis:7-alpine
+    container_name: chatwoot-redis
+    networks: [oss-stack]
+    restart: unless-stopped
+
+  chatwoot:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot
+    networks: [oss-stack]
+    depends_on:
+      chatwoot-db:
+        condition: service_healthy
+    ports:
+      - "3200:3000"
+    environment:
+      - RAILS_ENV=production
+      - SECRET_KEY_BASE=${CHATWOOT_SECRET:-generate_64_char_hex_here}
+      - DATABASE_URL=postgres://chatwoot:${CHATWOOT_DB_PASS:-chatwoot_secret}@chatwoot-db/chatwoot
+      - REDIS_URL=redis://chatwoot-redis:6379
+      - INSTALLATION_ENV=docker
+      - FRONTEND_URL=http://${SERVER_IP:-localhost}:3200
+      - DEFAULT_LOCALE=en
+    command: bundle exec rails server -b 0.0.0.0 -p 3000
+    restart: unless-stopped
+
+  chatwoot-worker:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot-worker
+    networks: [oss-stack]
+    depends_on:
+      chatwoot-db:
+        condition: service_healthy
+    environment:
+      - RAILS_ENV=production
+      - SECRET_KEY_BASE=${CHATWOOT_SECRET:-generate_64_char_hex_here}
+      - DATABASE_URL=postgres://chatwoot:${CHATWOOT_DB_PASS:-chatwoot_secret}@chatwoot-db/chatwoot
+      - REDIS_URL=redis://chatwoot-redis:6379
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # WAHA — WhatsApp HTTP API
+  # Access: http://localhost:3100
+  # Swagger: http://localhost:3100/
+  # github.com/devlikeapro/waha
+  # ──────────────────────────────────────────────
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: waha
+    networks: [oss-stack]
+    ports:
+      - "3100:3000"
+    volumes:
+      - waha-sessions:/app/.sessions
+    environment:
+      - WAHA_DASHBOARD_ENABLED=true
+      - WAHA_DASHBOARD_USERNAME=${WAHA_USER:-admin}
+      - WAHA_DASHBOARD_PASSWORD=${WAHA_PASS:-change_me_waha}
+      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      - WHATSAPP_HOOK_URL=http://n8n:5678/webhook/waha-incoming
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # LIVEKIT — WebRTC + AI voice agent server
+  # Access: http://localhost:7880 (API)
+  # github.com/livekit/livekit
+  # ──────────────────────────────────────────────
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit
+    networks: [oss-stack]
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit.yaml:/livekit.yaml
+    command: --config /livekit.yaml --dev
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # NTFY — push notifications
+  # Access: http://localhost:3300
+  # github.com/binwiederhier/ntfy
+  # ──────────────────────────────────────────────
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    container_name: ntfy
+    networks: [oss-stack]
+    ports:
+      - "3300:80"
+    volumes:
+      - ntfy-data:/var/lib/ntfy
+      - ntfy-cache:/var/cache/ntfy
+    environment:
+      - NTFY_BASE_URL=http://${SERVER_IP:-localhost}:3300
+      - NTFY_AUTH_DEFAULT_ACCESS=deny-all
+    command: serve --config /etc/ntfy/server.yml
+    restart: unless-stopped
+
+volumes:
+  textbee-db:
+  sms-gateway-data:
+  routr-data:
+  fonoster-data:
+  chatwoot-db:
+  waha-sessions:
+  ntfy-data:
+  ntfy-cache:

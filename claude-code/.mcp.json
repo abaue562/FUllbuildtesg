@@ -1,0 +1,62 @@
+{
+  "mcpServers": {
+
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+
+    "fetch": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"]
+    },
+
+    "postgres": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@bytebase/dbhub", "--dsn", "${DATABASE_URL}"]
+    },
+
+    "memory": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+
+    "git": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@cline/mcp-server-git", "--repository", "."]
+    },
+
+    "n8n-workflow-builder": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@kernel.salacoste/n8n-workflow-builder"],
+      "env": {
+        "N8N_HOST": "${N8N_URL:-http://localhost:5678}",
+        "N8N_API_KEY": "${N8N_API_KEY}"
+      }
+    },
+
+    "n8n-nodes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": {
+        "N8N_API_URL": "${N8N_URL:-http://localhost:5678}/api/v1",
+        "N8N_API_KEY": "${N8N_API_KEY}",
+        "MCP_MODE": "http",
+        "LOG_LEVEL": "error"
+      }
+    }
+
+  }
+}
