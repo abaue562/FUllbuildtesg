@@ -1,0 +1,128 @@
+# Homepage service registry. Edit in the browser via Filebrowser, or here directly.
+# Docs: https://gethomepage.dev/configs/services/
+
+- Control plane:
+    - Dockge:
+        href: http://localhost:5001
+        description: Start / stop / edit any docker compose stack from your browser
+        icon: dockge.png
+    - Dozzle:
+        href: http://localhost:8081
+        description: Live tail every container's logs
+        icon: dozzle.png
+    - Filebrowser:
+        href: http://localhost:8082
+        description: Browse, edit, upload files in the repo
+        icon: filebrowser.png
+    - code-server:
+        href: http://localhost:8443
+        description: Full VS Code IDE in your browser
+        icon: visual-studio-code.png
+    - Open WebUI:
+        href: http://localhost:3009
+        description: Chat with Claude and local LLMs
+        icon: openwebui.png
+    - Uptime Kuma:
+        href: http://localhost:3601
+        description: Uptime + status pages
+        icon: uptime-kuma.png
+
+- Build & ship:
+    - Coolify:
+        href: http://localhost:8000
+        description: Git push → deploy. Self-hosted Vercel.
+        icon: coolify.png
+    - n8n:
+        href: http://localhost:5678
+        description: 40+ pre-built workflows. Build new ones visually.
+        icon: n8n.png
+    - GitHub:
+        href: https://github.com
+        description: Source of truth
+        icon: github.png
+
+- CRM & ops:
+    - Twenty CRM:
+        href: http://localhost:3030
+        description: Modern Postgres-native CRM
+        icon: twentycrm.png
+    - Mautic:
+        href: http://localhost:8300
+        description: Marketing automation
+        icon: mautic.png
+    - Chatwoot:
+        href: http://localhost:3200
+        description: Inbox for email/chat/WhatsApp
+        icon: chatwoot.png
+    - AFFiNE:
+        href: http://localhost:3004
+        description: Notion alternative — docs + whiteboards
+        icon: affine.png
+
+- Content & growth:
+    - Ghost:
+        href: http://localhost:2368
+        description: Blog + newsletter
+        icon: ghost.png
+    - Postiz:
+        href: http://localhost:5000
+        description: Social media scheduler
+        icon: postiz.png
+    - Listmonk:
+        href: http://localhost:9001
+        description: Newsletter sender
+        icon: listmonk.png
+    - Plausible:
+        href: http://localhost:8000
+        description: Privacy-friendly analytics
+        icon: plausible-analytics.png
+
+- Data & search:
+    - Supabase Studio:
+        href: http://localhost:54323
+        description: Postgres + Auth + Realtime + Storage
+        icon: supabase.png
+    - Metabase:
+        href: http://localhost:3040
+        description: BI dashboards
+        icon: metabase.png
+    - Meilisearch:
+        href: http://localhost:7700
+        description: Lightning search
+        icon: meilisearch.png
+    - Qdrant:
+        href: http://localhost:6333
+        description: Vector DB for AI
+        icon: qdrant.png
+    - MinIO:
+        href: http://localhost:9001
+        description: S3-compatible object storage
+        icon: minio.png
+
+- Comms & voice:
+    - Fonoster:
+        href: http://localhost:3401
+        description: Open-source Twilio
+        icon: fonoster.png
+    - WAHA:
+        href: http://localhost:3100
+        description: WhatsApp HTTP API
+        icon: whatsapp.png
+    - LiveKit:
+        href: http://localhost:7880
+        description: Realtime audio/video for AI agents
+        icon: livekit.png
+    - Ntfy:
+        href: http://localhost:3300
+        description: Push notifications
+        icon: ntfy.png
+
+- Media generation:
+    - ComfyUI:
+        href: http://localhost:8188
+        description: Stable Diffusion / Flux node editor
+        icon: comfyui.png
+    - Whisper:
+        href: http://localhost:9000
+        description: Speech-to-text API
+        icon: openai-whisper.png

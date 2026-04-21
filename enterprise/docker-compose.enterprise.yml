@@ -1,0 +1,35 @@
+version: "3.9"
+# Enterprise add-on stack: SSO/SCIM, fine-grained authz, secrets, audit storage.
+services:
+  jackson:
+    image: boxyhq/jackson:latest
+    container_name: jackson
+    ports: ["5225:5225"]
+    environment:
+      DB_ENGINE: sql
+      DB_TYPE: postgres
+      DB_URL: ${DATABASE_URL}
+      JACKSON_API_KEYS: ${JACKSON_API_KEY}
+      EXTERNAL_URL: ${EXTERNAL_URL:-http://localhost:5225}
+      IDP_ENABLED: "true"
+    restart: unless-stopped
+
+  openfga:
+    image: openfga/openfga:latest
+    container_name: openfga
+    command: run
+    ports: ["8090:8080", "3001:3000"]
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: ${DATABASE_URL}
+    restart: unless-stopped
+
+  infisical:
+    image: infisical/infisical:latest
+    container_name: infisical
+    ports: ["8222:8080"]
+    environment:
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET}
+      DB_CONNECTION_URI: ${DATABASE_URL}
+    restart: unless-stopped

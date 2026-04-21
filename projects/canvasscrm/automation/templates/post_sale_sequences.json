@@ -1,0 +1,169 @@
+{
+  "sequences": [
+    {
+      "key": "post_sale_onboarding",
+      "name": "Post-Sale Customer Onboarding",
+      "description": "7-touch sequence that confirms the sale, sets expectations, and drives referrals",
+      "trigger": "deal.status = paid",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": 5,
+          "channel": "sms",
+          "template_key": "sale_confirm_sms",
+          "body": "Hi {{customer_first_name}}, you're confirmed! {{rep_first_name}} will be in touch within 24hrs to schedule installation. Questions? Reply here anytime."
+        },
+        {
+          "step": 2,
+          "delay_minutes": 15,
+          "channel": "email",
+          "template_key": "sale_welcome_email",
+          "subject": "Welcome to {{company_name}} — here's what happens next",
+          "body": "Hi {{customer_first_name}},\n\nThank you for choosing {{company_name}}. Here's what you can expect:\n\n1. **Scheduling call** — {{rep_first_name}} will call within 24 hours to lock in your installation date.\n2. **Pre-install inspection** — Our team will confirm site details 2 days before install.\n3. **Installation day** — Typically {{install_hours}} hours. We leave the site clean.\n4. **Activation** — You'll receive a welcome kit with everything you need.\n\nYour order summary:\n- Product: {{product_name}}\n- Amount: {{sale_amount}}\n- Rep: {{rep_first_name}} {{rep_last_name}}\n\nQuestions? Reply to this email or call {{support_phone}}.\n\n— The {{company_name}} Team"
+        },
+        {
+          "step": 3,
+          "delay_minutes": 1440,
+          "channel": "sms",
+          "template_key": "day1_checkin_sms",
+          "body": "Hi {{customer_first_name}}, this is {{rep_first_name}} from {{company_name}}. Reaching out to schedule your install — when works best this week? Morning or afternoon?"
+        },
+        {
+          "step": 4,
+          "delay_minutes": 4320,
+          "channel": "email",
+          "template_key": "day3_prep_email",
+          "subject": "Getting ready for your {{product_name}} installation",
+          "body": "Hi {{customer_first_name}},\n\nYour installation is coming up! A few quick things to do beforehand:\n\n✅ Clear the work area ({{prep_instructions}})\n✅ Have someone 18+ home during the install window\n✅ Note your WiFi password if applicable\n\nNeed to reschedule? Just reply or call {{rep_phone}}.\n\nSee you soon!"
+        },
+        {
+          "step": 5,
+          "delay_minutes": 10080,
+          "channel": "sms",
+          "template_key": "day7_satisfaction_sms",
+          "body": "Hey {{customer_first_name}}! Quick check-in — how's everything going with your {{product_name}}? Any questions or issues, just text back. We're here."
+        },
+        {
+          "step": 6,
+          "delay_minutes": 20160,
+          "channel": "email",
+          "template_key": "day14_review_email",
+          "subject": "How are we doing, {{customer_first_name}}?",
+          "body": "Hi {{customer_first_name}},\n\nIt's been two weeks since your {{product_name}} was installed. We'd love to hear how it's going.\n\n⭐ Leave us a quick Google review — it means the world to small teams like ours:\n{{review_link}}\n\nAnd if you know anyone who might benefit from what we did for you, we have a referral program — you both get {{referral_reward}}.\n\nShare your link: {{referral_link}}\n\nThank you again,\n{{rep_first_name}} at {{company_name}}"
+        },
+        {
+          "step": 7,
+          "delay_minutes": 129600,
+          "channel": "email",
+          "template_key": "day90_upsell_email",
+          "subject": "{{customer_first_name}}, time for your complimentary 90-day check-in",
+          "body": "Hi {{customer_first_name}},\n\nWe wanted to follow up on your {{product_name}} — has it been meeting your expectations?\n\nWe also have a few new services that pair really well with what you already have:\n\n{{upsell_suggestions}}\n\nWant a quick call to go over options? Book a time here: {{booking_link}}\n\n— {{rep_first_name}}"
+        }
+      ]
+    },
+    {
+      "key": "callback_reminder",
+      "name": "Callback Reminder Sequence",
+      "description": "Multi-touch to remind rep + warm the customer before the callback visit",
+      "trigger": "door_callbacks.callback_at set",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": -30,
+          "channel": "push",
+          "template_key": "callback_rep_push",
+          "body": "📍 Callback in 30 min — {{customer_name}} at {{address}}. They said: \"{{callback_reason}}\". Decision maker: {{decision_maker}}."
+        },
+        {
+          "step": 2,
+          "delay_minutes": -1440,
+          "channel": "sms",
+          "template_key": "callback_warm_sms",
+          "body": "Hi {{customer_first_name}}, this is {{rep_first_name}} from {{company_name}}. Just a heads-up — I'll be stopping by tomorrow as planned. Looking forward to seeing you!"
+        },
+        {
+          "step": 3,
+          "delay_minutes": 0,
+          "channel": "push",
+          "template_key": "callback_now_push",
+          "body": "⏰ Time for your callback — {{customer_name}} at {{address}}. Last objection: {{last_objection}}. Suggested opener: \"Last time you mentioned {{callback_reason}} — I wanted to come back with an answer.\""
+        },
+        {
+          "step": 4,
+          "delay_minutes": 120,
+          "channel": "push",
+          "template_key": "callback_missed_push",
+          "body": "Did you hit {{address}}? Mark it done or reschedule so we keep the lead warm."
+        }
+      ]
+    },
+    {
+      "key": "interested_nurture",
+      "name": "Interested Lead Nurture",
+      "description": "Keep a warm lead engaged until they're ready to buy",
+      "trigger": "knock.status = interested",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": 60,
+          "channel": "sms",
+          "template_key": "interested_followup_sms",
+          "body": "Hi {{customer_first_name}}, great chatting with you today! I'm sending over a quick overview of {{product_name}} so you have everything in one place. Any questions, just reply!"
+        },
+        {
+          "step": 2,
+          "delay_minutes": 1440,
+          "channel": "email",
+          "template_key": "interested_overview_email",
+          "subject": "Everything you need to know about {{product_name}}",
+          "body": "Hi {{customer_first_name}},\n\nAs promised — here's a quick overview.\n\n**What you get:**\n{{product_bullets}}\n\n**What neighbors on your street are saying:**\n{{social_proof}}\n\n**Your custom quote:**\n{{quote_link}}\n\nI'll check back in a few days — no pressure at all.\n\n— {{rep_first_name}}"
+        },
+        {
+          "step": 3,
+          "delay_minutes": 4320,
+          "channel": "sms",
+          "template_key": "interested_d3_sms",
+          "body": "Hey {{customer_first_name}}, {{rep_first_name}} here — just wanted to see if you had any questions after looking things over. We have a couple open slots this week if you'd like to move forward."
+        },
+        {
+          "step": 4,
+          "delay_minutes": 10080,
+          "channel": "email",
+          "template_key": "interested_d7_email",
+          "subject": "Still thinking it over, {{customer_first_name}}?",
+          "body": "Hi {{customer_first_name}},\n\nNo worries if the timing isn't right — I just wanted to make sure you had everything you need to make the right decision.\n\nOne thing I should mention: {{urgency_hook}}\n\nIf you want to lock in your spot, here's the easiest way: {{booking_link}}\n\nOtherwise I'll leave you to it!\n\n— {{rep_first_name}} at {{company_name}}"
+        }
+      ]
+    },
+    {
+      "key": "no_answer_retouch",
+      "name": "No Answer Re-Touch",
+      "description": "Auto-schedule a re-knock for no-answer doors at peak answer times",
+      "trigger": "knock.status = no_answer",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": 0,
+          "channel": "push",
+          "template_key": "no_answer_reroute_push",
+          "body": "No answer at {{address}}. Best retouch time based on street data: {{best_retouch_time}}. Added to your route."
+        }
+      ]
+    },
+    {
+      "key": "rep_daily_brief",
+      "name": "Rep Daily Brief",
+      "description": "Push at shift start with today's best doors, callbacks due, and weather",
+      "trigger": "cron: 0 8 * * 1-6",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": 0,
+          "channel": "push",
+          "template_key": "daily_brief_push",
+          "body": "☀️ Good morning {{rep_first_name}}! Today: {{callbacks_due}} callbacks due, {{hot_doors}} hot doors on your route. Best hours today: {{best_hours}}. Weather: {{weather_summary}}. Go get em!"
+        }
+      ]
+    }
+  ]
+}

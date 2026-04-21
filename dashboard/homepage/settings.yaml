@@ -1,0 +1,29 @@
+title: OSS Empire
+theme: dark
+color: violet
+headerStyle: clean
+layout:
+  Control plane:
+    style: row
+    columns: 3
+  Build & ship:
+    style: row
+    columns: 3
+  CRM & ops:
+    style: row
+    columns: 4
+  Content & growth:
+    style: row
+    columns: 4
+  Data & search:
+    style: row
+    columns: 5
+  Comms & voice:
+    style: row
+    columns: 4
+  Media generation:
+    style: row
+    columns: 2
+quicklaunch:
+  searchDescriptions: true
+  hideInternetSearch: false

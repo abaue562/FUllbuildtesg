@@ -1,0 +1,96 @@
+{
+  "sequences": [
+    {
+      "key": "winback",
+      "name": "Cancellation Win-Back",
+      "description": "Automated 5-touch win-back campaign for cancelled deals within 90 days",
+      "trigger": "deal.status = cancelled AND age < 90 days",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": 1440,
+          "channel": "sms",
+          "template_key": "winback_d1_sms",
+          "body": "Hi {{customer_first_name}}, this is {{rep_first_name}} from {{company_name}}. I saw your order was cancelled — totally understand. Is there anything I could have done differently? Would love your honest feedback."
+        },
+        {
+          "step": 2,
+          "delay_minutes": 4320,
+          "channel": "email",
+          "template_key": "winback_d3_email",
+          "subject": "We'd love a second chance, {{customer_first_name}}",
+          "body": "Hi {{customer_first_name}},\n\nI wanted to reach out personally. If price was a concern, I may have some options I didn't mention. If it was timing, no problem — we can hold your quote for 30 days.\n\nWhatever the reason, I'd love 5 minutes to make it right.\n\nBook a quick call: {{booking_link}}\n\n— {{rep_first_name}}"
+        },
+        {
+          "step": 3,
+          "delay_minutes": 10080,
+          "channel": "sms",
+          "template_key": "winback_d7_sms",
+          "body": "Hey {{customer_first_name}} — {{rep_first_name}} here. Quick heads up: we just launched a {{promo_offer}} for customers who come back this month. Thought of you. Want details?"
+        },
+        {
+          "step": 4,
+          "delay_minutes": 20160,
+          "channel": "email",
+          "template_key": "winback_d14_email",
+          "subject": "{{customer_first_name}}, your neighbors are asking about you",
+          "body": "Hi {{customer_first_name}},\n\nSince we last spoke, {{street_sold_count}} more homes on {{street_name}} have signed up with {{company_name}}.\n\nI wanted to give you one last heads-up before I close out your file. If you'd like to get back on board, I can honor your original quote price.\n\nReply YES and I'll reach out to schedule.\n\n— {{rep_first_name}}"
+        },
+        {
+          "step": 5,
+          "delay_minutes": 43200,
+          "channel": "email",
+          "template_key": "winback_d30_email",
+          "subject": "Closing out your file — one last thing",
+          "body": "Hi {{customer_first_name}},\n\nI'm closing out your file today. Before I do — if you ever want to revisit {{product_name}}, just reply to this email and I'll pick up right where we left off. No pressure ever.\n\nThank you for the time you gave me.\n\n— {{rep_first_name}} at {{company_name}}"
+        }
+      ]
+    },
+    {
+      "key": "referral_ask",
+      "name": "Referral Ask Sequence",
+      "description": "Prompt happy customers to refer neighbors at the 14-day and 60-day mark",
+      "trigger": "deal.status = paid AND days_since = 14",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": 0,
+          "channel": "sms",
+          "template_key": "referral_d14_sms",
+          "body": "Hey {{customer_first_name}}! Hope everything is going great with your {{product_name}}. Do you know any neighbors who might want the same? You both get {{referral_reward}} 🎁 Your link: {{referral_link}}"
+        },
+        {
+          "step": 2,
+          "delay_minutes": 64800,
+          "channel": "email",
+          "template_key": "referral_d45_email",
+          "subject": "Know someone who'd love {{product_name}}?",
+          "body": "Hi {{customer_first_name}},\n\nYou've had your {{product_name}} for about 6 weeks now — hope it's been everything you expected!\n\nIf you know anyone looking for the same, your personal referral link gets them {{referral_customer_reward}} and puts {{referral_rep_reward}} in your pocket.\n\nShare: {{referral_link}}\n\nThank you again for choosing us!\n— {{company_name}}"
+        }
+      ]
+    },
+    {
+      "key": "review_ask",
+      "name": "Review Ask Sequence",
+      "description": "Get Google reviews from happy customers at peak satisfaction moment",
+      "trigger": "deal.status = paid AND days_since = 7",
+      "steps": [
+        {
+          "step": 1,
+          "delay_minutes": 0,
+          "channel": "sms",
+          "template_key": "review_d7_sms",
+          "body": "Hi {{customer_first_name}}, {{rep_first_name}} here! Quick question — on a scale of 1–10, how's your {{product_name}} treating you? (Reply with a number)"
+        },
+        {
+          "step": 2,
+          "delay_minutes": 30,
+          "channel": "sms",
+          "template_key": "review_followup_sms",
+          "condition": "reply_score >= 8",
+          "body": "That's awesome to hear! Would you mind leaving us a quick Google review? It helps our small team a lot 🙏 {{review_link}}"
+        }
+      ]
+    }
+  ]
+}

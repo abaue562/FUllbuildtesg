@@ -1,0 +1,85 @@
+# Browser-based control plane.
+# After `just up` you control the entire empire from these URLs in your browser:
+#   http://localhost:8080  Homepage          (gethomepage.dev — service dashboard)
+#   http://localhost:5001  Dockge            (dockge.kuma.pet — start/stop/edit compose)
+#   http://localhost:8081  Dozzle            (dozzle.dev — live docker logs)
+#   http://localhost:8082  Filebrowser       (filebrowser.org — file management)
+#   http://localhost:8443  code-server       (coder.com/oss — VS Code in browser)
+#   http://localhost:3009  Open WebUI        (openwebui.com — chat UI for Claude/Ollama)
+#   http://localhost:8000  Coolify           (coolify.io — git push → deploy)
+#   http://localhost:3601  Uptime Kuma       (uptime.kuma.pet — uptime monitoring)
+# All real, maintained, MIT/Apache OSS projects.
+version: "3.9"
+
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    ports: ["8080:3000"]
+    volumes:
+      - ./dashboard/homepage:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - HOMEPAGE_ALLOWED_HOSTS=*
+
+  dockge:
+    image: louislam/dockge:1
+    container_name: dockge
+    restart: unless-stopped
+    ports: ["5001:5001"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./dashboard/dockge/data:/app/data
+      - ./:/opt/stacks
+    environment:
+      - DOCKGE_STACKS_DIR=/opt/stacks
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    ports: ["8081:8080"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOZZLE_NO_ANALYTICS=true
+
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: filebrowser
+    restart: unless-stopped
+    ports: ["8082:80"]
+    volumes:
+      - ../:/srv
+      - ./dashboard/filebrowser/database.db:/database.db
+
+  code-server:
+    image: codercom/code-server:latest
+    container_name: code-server
+    restart: unless-stopped
+    ports: ["8443:8080"]
+    environment:
+      - PASSWORD=${CODE_SERVER_PASSWORD:-changeme}
+    volumes:
+      - ../:/home/coder/project
+      - ./dashboard/code-server/config:/home/coder/.config
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    ports: ["3009:8080"]
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - WEBUI_AUTH=False
+    volumes:
+      - ./dashboard/open-webui:/app/backend/data
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports: ["3601:3001"]
+    volumes:
+      - ./dashboard/uptime-kuma:/app/data

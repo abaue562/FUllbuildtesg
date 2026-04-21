@@ -1,0 +1,142 @@
+# OSS Arsenal — enterprise-resellable building blocks
+# Rule: MIT / Apache-2.0 / BSD only. No AGPL. Pinned versions.
+# Each entry: repo, license, replaces, wrap_strategy
+
+auth:
+  - repo: boxyhq/jackson           # SSO (SAML+OIDC) + Directory Sync (SCIM)
+    license: Apache-2.0
+    replaces: WorkOS, Auth0 Enterprise
+    wrap: Drop-in container; expose /sso endpoints behind your app.
+  - repo: better-auth/better-auth
+    license: MIT
+    replaces: NextAuth pain
+    wrap: TS-first auth with orgs, 2FA, passkeys.
+  - repo: ory/kratos
+    license: Apache-2.0
+    replaces: Cognito
+    wrap: Headless identity for multi-tenant.
+
+data:
+  - repo: supabase/supabase
+    license: Apache-2.0
+    replaces: Firebase
+    wrap: Postgres + Auth + Realtime + Storage + Edge Functions.
+  - repo: nocodb/nocodb
+    license: AGPL  # ⚠ self-host only, no resale
+    replaces: Airtable
+  - repo: directus/directus
+    license: BSL→MIT
+    replaces: Strapi
+    wrap: Headless data + admin UI.
+  - repo: PostgREST/postgrest
+    license: MIT
+    replaces: hand-rolled CRUD APIs
+
+search:
+  - repo: meilisearch/meilisearch
+    license: MIT
+    wrap: Drop-in instant search; typo-tolerant.
+  - repo: typesense/typesense
+    license: GPL  # ⚠ careful for SaaS resale
+  - repo: qdrant/qdrant
+    license: Apache-2.0
+    wrap: Vector DB for RAG / semantic.
+
+payments_billing:
+  - repo: getlago/lago
+    license: AGPL  # self-host only
+    replaces: Chargebee, Metronome
+  - repo: polarsource/polar
+    license: Apache-2.0
+    replaces: Stripe Billing for digital products
+  - repo: dubinc/dub
+    license: AGPL  # self-host
+    replaces: Bitly, Rebrandly (link attribution = revenue)
+
+ai:
+  - repo: BerriAI/litellm
+    license: MIT
+    wrap: One API for 100+ LLMs incl. Anthropic.
+  - repo: vllm-project/vllm
+    license: Apache-2.0
+    wrap: Self-host inference.
+  - repo: ollama/ollama
+    license: MIT
+    wrap: Local model runtime.
+  - repo: langchain-ai/langgraph
+    license: MIT
+    wrap: Stateful agent graphs.
+  - repo: run-llama/llama_index
+    license: MIT
+  - repo: deepset-ai/haystack
+    license: Apache-2.0
+
+workflow:
+  - repo: n8n-io/n8n
+    license: SUSTAINABLE-USE  # self-host OK, resale gray
+  - repo: temporalio/temporal
+    license: MIT
+    wrap: Durable workflow backbone for serious apps.
+  - repo: triggerdotdev/trigger.dev
+    license: Apache-2.0
+  - repo: inngest/inngest
+    license: Apache-2.0
+
+comms:
+  - repo: chatwoot/chatwoot
+    license: MIT
+    replaces: Intercom
+  - repo: novuhq/novu
+    license: Apache-2.0
+    replaces: Courier (multi-channel notifications)
+  - repo: knadh/listmonk
+    license: AGPL  # self-host only
+  - repo: plunk/plunk
+    license: Apache-2.0
+    replaces: Loops.so
+
+analytics:
+  - repo: PostHog/posthog
+    license: MIT
+    replaces: Mixpanel, Amplitude, FullStory
+  - repo: plausible/analytics
+    license: AGPL  # self-host only
+  - repo: umami-software/umami
+    license: MIT
+  - repo: metabase/metabase
+    license: AGPL  # self-host only
+
+enterprise_compliance:
+  - repo: boxyhq/jackson         # SSO + SCIM (above)
+  - repo: casbin/casbin          # RBAC/ABAC
+    license: Apache-2.0
+  - repo: openfga/openfga        # Google-Zanzibar style fine-grained authz
+    license: Apache-2.0
+  - repo: hashicorp/vault
+    license: BSL  # ⚠
+  - repo: trycua/cua             # audit/compliance helpers
+    license: MIT
+
+files_media:
+  - repo: minio/minio
+    license: AGPL  # self-host only
+  - repo: imgproxy/imgproxy
+    license: MIT
+  - repo: coollabsio/coolify
+    license: Apache-2.0
+    wrap: Heroku-killer for self-host.
+
+realtime_collab:
+  - repo: yjs/yjs
+    license: MIT
+    wrap: CRDTs for multiplayer docs.
+  - repo: soketi/soketi
+    license: MIT
+    replaces: Pusher
+
+# RESALE-SAFE shortlist (use these if you sell SaaS):
+# Better-Auth, Supabase, PostgREST, Meilisearch, Qdrant, Polar,
+# LiteLLM, vLLM, Ollama, LangGraph, LlamaIndex, Haystack,
+# Temporal, Trigger.dev, Inngest, Chatwoot, Novu, Plunk,
+# PostHog, Umami, Imgproxy, Coolify, Yjs, Soketi,
+# BoxyHQ Jackson, Casbin, OpenFGA, Directus

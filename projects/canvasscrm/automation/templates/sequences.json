@@ -1,0 +1,78 @@
+{
+  "sequences": [
+    {
+      "name": "Callback follow-up",
+      "trigger_type": "door_outcome",
+      "trigger_value": "callback",
+      "steps": [
+        { "delay_minutes": 0, "channel": "task", "template_key": "callback_create_task" },
+        { "delay_minutes": -120, "channel": "push", "template_key": "callback_2h_reminder" },
+        { "delay_minutes": 120, "channel": "sms", "template_key": "callback_did_you_make_it" }
+      ]
+    },
+    {
+      "name": "Interested nurture",
+      "trigger_type": "door_outcome",
+      "trigger_value": "interested",
+      "steps": [
+        { "delay_minutes": 5,     "channel": "sms",   "template_key": "interested_intro" },
+        { "delay_minutes": 1440,  "channel": "email", "template_key": "interested_recap" },
+        { "delay_minutes": 4320,  "channel": "sms",   "template_key": "interested_check_in" },
+        { "delay_minutes": 10080, "channel": "email", "template_key": "interested_addon" },
+        { "delay_minutes": 20160, "channel": "sms",   "template_key": "interested_last_call" }
+      ]
+    },
+    {
+      "name": "Sold onboarding + upsell",
+      "trigger_type": "deal_status",
+      "trigger_value": "paid",
+      "steps": [
+        { "delay_minutes": 0,     "channel": "sms",       "template_key": "sold_welcome" },
+        { "delay_minutes": 5,     "channel": "email",     "template_key": "sold_receipt" },
+        { "delay_minutes": 1440,  "channel": "email",     "template_key": "sold_what_to_expect" },
+        { "delay_minutes": 10080, "channel": "sms",       "template_key": "sold_review_request" },
+        { "delay_minutes": 20160, "channel": "ai_upsell", "template_key": "sold_upsell_neighbors" },
+        { "delay_minutes": 43200, "channel": "sms",       "template_key": "sold_referral_push" },
+        { "delay_minutes": 129600,"channel": "email",     "template_key": "sold_maintenance_plan" },
+        { "delay_minutes": 525600,"channel": "email",     "template_key": "sold_anniversary" }
+      ]
+    },
+    {
+      "name": "Not-home retry",
+      "trigger_type": "door_outcome",
+      "trigger_value": "not_home",
+      "steps": [
+        { "delay_minutes": 4320,  "channel": "task", "template_key": "retry_same_rep_pm" },
+        { "delay_minutes": 10080, "channel": "task", "template_key": "retry_other_rep" }
+      ]
+    }
+  ],
+  "templates": {
+    "interested_intro": {
+      "channel": "sms",
+      "body": "Hey {first_name}, this is {rep_name} from {org}. Here's the info I promised: {link}. Text me anytime."
+    },
+    "interested_recap": {
+      "channel": "email",
+      "subject": "Quick recap of what we discussed",
+      "body": "Hi {first_name},\n\nGreat meeting you today. As promised, here's a quick recap and the financing options:\n\n- {bullet_1}\n- {bullet_2}\n- {bullet_3}\n\nReady to move forward? {cta}\n\n– {rep_name}"
+    },
+    "sold_welcome": {
+      "channel": "sms",
+      "body": "🎉 Welcome aboard {first_name}! Install scheduled for {install_date}. Reply HELP anytime."
+    },
+    "sold_review_request": {
+      "channel": "sms",
+      "body": "Hi {first_name}, hope everything's great! Mind leaving us a quick ⭐⭐⭐⭐⭐ review? {review_link}"
+    },
+    "sold_referral_push": {
+      "channel": "sms",
+      "body": "Know a neighbor who'd love this? Refer them and you both get $100: {referral_link}"
+    },
+    "sold_maintenance_plan": {
+      "channel": "email",
+      "subject": "Your 90-day check-in + maintenance plan",
+      "body": "Hi {first_name},\n\nIt's been 90 days. Here's a maintenance plan that protects your investment for $X/yr.\n\n{cta}\n\n– {org}"
+    }
+  }
+}
